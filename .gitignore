@@ -33,3 +33,24 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Local credentials and signing configuration
+.env
+.env.*
+!.env.example
+secrets.properties
+keystore.properties
+signing.properties
+credentials.json
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Internal project specification
+/NEXA_Chat_Master_Spec_Nghiep_Vu_Chi_Tiet_3_Thanh_Vien.docx
