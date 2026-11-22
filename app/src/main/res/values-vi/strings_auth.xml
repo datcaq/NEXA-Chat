@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_brand">NEXA Chat</string>
+    <string name="auth_sign_in">Đăng nhập</string>
+    <string name="auth_register">Tạo tài khoản</string>
+    <string name="auth_phone_description">Chọn quốc gia hoặc nhập số bắt đầu bằng dấu + và mã quốc gia.</string>
+    <string name="auth_country">Quốc gia hoặc vùng</string>
+    <string name="auth_country_option">%1$s (+%2$d)</string>
+    <string name="auth_phone">Số điện thoại</string>
+    <string name="auth_continue">Tiếp tục</string>
+    <string name="auth_switch_register">Tạo tài khoản</string>
+    <string name="auth_switch_sign_in">Tôi đã có tài khoản</string>
+    <string name="auth_change_number">Đổi số điện thoại</string>
+    <string name="auth_error_country">Chọn quốc gia hoặc nhập số điện thoại quốc tế.</string>
+    <string name="auth_error_phone_required">Nhập số điện thoại của bạn.</string>
+    <string name="auth_error_phone_invalid">Kiểm tra lại số điện thoại và mã quốc gia.</string>
+    <string name="auth_otp_title">Xác minh số điện thoại</string>
+    <string name="auth_otp_description">Đây là bản xem trước. Nhập số mẫu để xem phản hồi của biểu mẫu.</string>
+    <string name="auth_otp">Mã xác minh mẫu</string>
+    <string name="auth_error_otp">Nhập mã mẫu chỉ gồm chữ số.</string>
+    <string name="auth_verify_preview">Xem thử xác minh</string>
+    <string name="auth_loading">Đang xử lý</string>
+    <string name="auth_sign_in_pending">Định dạng số điện thoại hợp lệ. Đăng nhập đang chờ cấu hình xác thực.</string>
+    <string name="auth_otp_preview">Chưa gửi tin nhắn SMS.</string>
+    <string name="auth_verification_pending">Bản xem trước chưa xác minh mã hoặc tạo tài khoản.</string>
+</resources>
