@@ -1,0 +1,8 @@
+<resources>
+ <color name="groups_primary">#075E54</color>
+ <color name="groups_secondary">#128C7E</color>
+ <color name="groups_background">#EFEAE2</color>
+ <color name="groups_outgoing">#E7FFDB</color>
+ <color name="groups_accent">#25D366</color>
+ <color name="groups_read">#53BDEB</color>
+</resources>

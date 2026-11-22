@@ -1,0 +1,12 @@
+<resources>
+ <style name="Theme.NEXAChat.Groups" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+  <item name="colorPrimary">@color/groups_primary</item>
+  <item name="colorPrimaryVariant">@color/groups_primary</item>
+  <item name="colorOnPrimary">@android:color/white</item>
+  <item name="colorSecondary">@color/groups_secondary</item>
+  <item name="colorOnSecondary">@android:color/white</item>
+  <item name="android:statusBarColor">@color/groups_primary</item>
+  <item name="android:windowLightStatusBar">true</item>
+  <item name="android:windowLightNavigationBar">false</item>
+ </style>
+</resources>
