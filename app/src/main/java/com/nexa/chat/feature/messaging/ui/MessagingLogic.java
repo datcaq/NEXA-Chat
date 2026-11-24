@@ -35,6 +35,13 @@ public final class MessagingLogic {
  public static CompletionStage<List<OutboxEntry>> load(ConversationRepository repository,String id){
   return repository.listMessages(id).thenCombine(repository.listOutbox(id),(history,outbox)->merge(id,history,outbox));
  }
+ /** Each initiated source is charged independently, including a second-call synchronous throw. */
+ static CompletionStage<List<OutboxEntry>> load(ConversationRepository repository,String id,
+   MessagingExecution.AccountLease.RepositoryOperation operation){
+  CompletionStage<List<ServerMessage>> history=operation.source(()->repository.listMessages(id));
+  CompletionStage<List<OutboxEntry>> outbox=operation.source(()->repository.listOutbox(id));
+  return history.thenCombine(outbox,(a,b)->merge(id,a,b));
+ }
  public static List<OutboxEntry> merge(String id,List<ServerMessage> history,List<OutboxEntry> outbox){
   Map<String,OutboxEntry> rows=new LinkedHashMap<>();
   for(OutboxEntry e:outbox){Message m=e.getMessage();if(!id.equals(m.getConversationId()))throw new IllegalArgumentException("Conversation mismatch");

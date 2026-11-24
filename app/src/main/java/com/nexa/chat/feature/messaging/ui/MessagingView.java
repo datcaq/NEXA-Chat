@@ -7,7 +7,6 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.*;
 
-import com.nexa.chat.feature.messaging.ChatNavigator;
 import com.nexa.chat.feature.messaging.model.*;
 import com.nexa.chat.feature.messaging.repository.ChatFailure;
 
@@ -29,29 +28,78 @@ public final class MessagingView extends LinearLayout {
     };
 
     private final MessagingController controller;
-    private final ChatNavigator navigator;
+    private final MessagingRouter router;
+    private final MessagingPresentation presentation;
+    private MessagingRouter.Subscription routeSubscription;
+    private long renderedRevision = -1;
+    private boolean historyLoading;
+    private boolean historyDirty;
+    private Button sendButton;
     private MessagingController.ViewSubscription subscription;
     private Binding binding;
     private String conversation;
-    private String title;
     private int generation;
     private LinearLayout rows;
     private EditText input;
+    private final DraftInputOrigin inputOrigin = new DraftInputOrigin();
 
-    public MessagingView(Context context, MessagingController controller, ChatNavigator navigator) {
+    /** PROPOSED TV2 entry: host retains controller and its router, not this View. */
+    public MessagingView(Context context, MessagingController controller, MessagingRouter router) {
         super(context);
         setOrientation(VERTICAL);
         this.controller = Objects.requireNonNull(controller);
-        this.navigator = Objects.requireNonNull(navigator);
+        this.router = Objects.requireNonNull(router);
+        if (router != controller.getRouter()) throw new IllegalArgumentException("Different account router");
+        presentation = new MessagingPresentation(router);
+    }
+
+    /** Main-thread host signals; these are proposed, not an approved Home interface. */
+    public void setHostState(boolean messagesSelected, boolean hostResumed) {
+        if (!presentation.setHostState(messagesSelected, hostResumed)) return;
+        generation++;
+        historyLoading = false;
+        renderedRevision = -1;
+        if (presentation.isActive()) renderRoute();
+    }
+
+    public boolean handleBack() { return router.handleBack(); }
+
+    private void renderRoute() {
+        if (!controller.isActive()) { showInvalidated(); return; }
+        if (!presentation.isActive()) return;
+        MessagingRouter.Route route = router.currentRoute();
+        if (renderedRevision == route.getRevision()) return;
+        renderedRevision = route.getRevision();
+        historyLoading = false;
+        if (route.getConversationId() == null) renderList();
+        else renderConversation(route.getConversationId(), route.getTitle());
+    }
+
+    private void stateChanged() {
+        if (!controller.isActive()) { showInvalidated(); return; }
+        if (!presentation.isActive()) return;
+        if (renderedRevision != router.currentRoute().getRevision()) renderRoute();
+        else if (conversation != null) {
+            if (historyLoading) historyDirty = true;
+            else loadHistory();
+        }
+    }
+
+    private void loadHistory() {
+        historyLoading = true;
+        historyDirty = false;
+        await(controller.loadMessages(conversation), RequestKind.HISTORY);
     }
 
     public void refresh() {
         if (!controller.isActive()) { showInvalidated(); return; }
-        if (conversation == null) showList();
-        else showConversation(conversation, title);
+        renderedRevision = -1;
+        renderRoute();
     }
 
-    public void showList() {
+    public void showList() { router.showList(); renderRoute(); }
+
+    private void renderList() {
         if (!controller.isActive()) { showInvalidated(); return; }
         conversation = null;
         generation++;
@@ -69,59 +117,60 @@ public final class MessagingView extends LinearLayout {
     public void openDirect(String peer) {
         if (peer == null || peer.trim().isEmpty()) return;
         if (!controller.isActive()) { showInvalidated(); return; }
-        generation++;
-        removeAllViews();
-        label(this, "Đang mở hội thoại…");
-        await(controller.openDirect(peer), RequestKind.DIRECT);
+        // Navigation completion is account-owned and captures no View. No parallel UI navigation.
+        await(controller.openDirectAndNavigate(peer), RequestKind.DIRECT);
     }
 
-    public void showConversation(String id, String name) {
+    public void showConversation(String id, String name) { router.openConversation(id, name); renderRoute(); }
+
+    private void renderConversation(String id, String name) {
         if (!controller.isActive()) { showInvalidated(); return; }
         conversation = id;
-        title = name;
         generation++;
         removeAllViews();
-        button(this, "‹ Danh sách", () -> { navigator.back(); showList(); });
+        button(this, "‹ Danh sách", this::handleBack);
         label(this, name);
         rows = list();
         label(rows, "Đang tải…");
         input = new EditText(getContext());
         input.setHint("Nhập tin nhắn");
-        input.setText(controller.draft(id));
+        synchronizeDraft(controller.draft(id));
         addView(input);
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                boolean genuineUserInput = inputOrigin.isGenuineUserInput();
+                if (!genuineUserInput || !presentation.canType(id, genuineUserInput)) return;
                 try { controller.editDraft(id, s.toString()); }
                 catch (CancellationException closed) { showInvalidated(); }
             }
             @Override public void afterTextChanged(Editable s) {}
         });
-        Button send = button(this, "Gửi", () -> await(controller.sendDraft(id), RequestKind.SEND));
-        send.setEnabled(!controller.isSending(id));
-        await(controller.loadMessages(id), RequestKind.HISTORY);
+        sendButton = button(this, "Gửi", () -> {
+            CompletionStage<OutboxEntry> request = controller.sendDraft(id);
+            sendButton.setEnabled(!controller.isSending(id));
+            await(request, RequestKind.SEND);
+        });
+        sendButton.setEnabled(!controller.isSending(id));
+        loadHistory();
     }
 
     /** No future continuation captures this View or its child Views. */
     private void await(CompletionStage<?> request, RequestKind kind) {
-        deliver(request, new WeakReference<>(binding), generation, kind);
+        deliver(request, new WeakReference<>(binding), generation, presentation.capture(), router.navigationIntent(), kind);
     }
 
     private static void deliver(CompletionStage<?> request, WeakReference<Binding> target,
-                                int version, RequestKind kind) {
-        request.whenComplete((value, error) -> {
-            try {
-                MAIN_EXECUTOR.execute(() -> {
+                                int version, MessagingPresentation.Token token, long intent, RequestKind kind) {
+        request.whenCompleteAsync((value, error) -> {
                     Binding current = target.get();
                     MessagingView view = current == null ? null : current.currentView();
                     if (view == null || version != view.generation) return;
                     if (!view.controller.isActive()) { view.showInvalidated(); return; }
+                    if (!view.presentation.accepts(token)) return;
+                    if (kind == RequestKind.DIRECT && !view.router.isCurrentIntent(intent)) return;
                     view.onResult(kind, value, error);
-                });
-            } catch (RejectedExecutionException unavailable) {
-                // UI waiter is abandoned; account reconciliation remains controller-owned.
-            }
-        });
+        }, MAIN_EXECUTOR);
     }
 
     @SuppressWarnings("unchecked")
@@ -135,25 +184,21 @@ public final class MessagingView extends LinearLayout {
             if (error != null) {
                 label(this, error(error));
                 button(this, "Quay lại", this::showList);
-            } else {
-                Conversation item = (Conversation) value;
-                navigator.openConversation(item.getId());
-                showConversation(item.getId(), item.getTitle());
             }
             return;
         }
+        if (kind == RequestKind.HISTORY) historyLoading = false;
         rows.removeAllViews();
         if (kind == RequestKind.LIST) {
             if (error != null) {
                 label(rows, error(error));
-                button(rows, "Thử lại", this::showList);
+                button(rows, "Thử lại", this::refresh);
                 return;
             }
             List<Conversation> items = (List<Conversation>) value;
             if (items.isEmpty()) label(rows, "Chưa có hội thoại");
             for (Conversation item : items) button(rows, item.getTitle(), () -> {
-                navigator.openConversation(item.getId());
-                showConversation(item.getId(), item.getTitle());
+                router.openConversation(item.getId(), item.getTitle());
             });
             return;
         }
@@ -174,36 +219,54 @@ public final class MessagingView extends LinearLayout {
             }
         }
         if (!input.getText().toString().equals(controller.draft(conversation))) {
-            input.setText(controller.draft(conversation));
+            synchronizeDraft(controller.draft(conversation));
         }
         Throwable failure = controller.lastFailure(conversation);
         if (failure != null) label(rows, error(failure));
+        sendButton.setEnabled(!controller.isSending(conversation));
+        if (historyDirty) loadHistory();
+    }
+
+    private void synchronizeDraft(String draft) {
+        inputOrigin.synchronize(() -> input.setText(draft));
     }
 
     private void showInvalidated() {
         generation++;
+        conversation = null;
+        renderedRevision = -1;
+        historyLoading = false;
+        historyDirty = false;
+        closeBinding();
         removeAllViews();
         rows = null;
         input = null;
+        sendButton = null;
         label(this, "Phiên nhắn tin đã kết thúc");
     }
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         closeBinding();
+        presentation.setAttached(true);
+        renderedRevision = -1;
         Binding next = new Binding(this);
         binding = next;
         // Atomic subscribe returns a closed handle if invalidation won; no isActive/observe TOCTOU.
         subscription = controller.observe(MAIN_EXECUTOR, next::refresh, next::invalidated);
+        routeSubscription = router.observe(MAIN_EXECUTOR, next::routeChanged);
         if (!subscription.isOpen() || !controller.isActive()) showInvalidated();
     }
 
     @Override protected void onDetachedFromWindow() {
         generation++;
+        presentation.setAttached(false);
         closeBinding();
         removeAllViews();
         rows = null;
         input = null;
+        sendButton = null;
+        conversation = null;
         // Detach is not logout. The retained controller still owns ACK/retry/draft state.
         super.onDetachedFromWindow();
     }
@@ -211,6 +274,7 @@ public final class MessagingView extends LinearLayout {
     private void closeBinding() {
         if (binding != null) { binding.view.clear(); binding = null; }
         if (subscription != null) { subscription.close(); subscription = null; }
+        if (routeSubscription != null) { routeSubscription.close(); routeSubscription = null; }
     }
 
     private static final class Binding {
@@ -222,7 +286,11 @@ public final class MessagingView extends LinearLayout {
         }
         void refresh() {
             MessagingView value = currentView();
-            if (value != null) value.refresh();
+            if (value != null) value.stateChanged();
+        }
+        void routeChanged() {
+            MessagingView value = currentView();
+            if (value != null) value.renderRoute();
         }
         void invalidated() {
             MessagingView value = currentView();
@@ -236,8 +304,8 @@ public final class MessagingView extends LinearLayout {
         Button button = new Button(getContext());
         button.setText(text);
         button.setOnClickListener(view -> {
-            if (controller.isActive()) click.run();
-            else showInvalidated();
+            if (controller.isActive() && presentation.isActive()) click.run();
+            else if (!controller.isActive()) showInvalidated();
         });
         parent.addView(button);
         return button;

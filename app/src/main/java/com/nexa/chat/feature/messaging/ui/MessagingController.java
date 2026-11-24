@@ -7,7 +7,6 @@ import com.nexa.chat.feature.messaging.repository.ConversationRepository;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * TV2 owner of one user/epoch, retained independently of Views; not a Session implementation.
@@ -20,31 +19,107 @@ import java.util.function.Supplier;
  * outside gate. Already claimed deliveries may finish; consumers must check their current binding.
  *
  * No repository, executor, observer, caller Runnable or future completion executes under gate.
- * The default dispatch executor is direct; hosts may inject a worker executor. No executor is owned
- * or shut down here. Session coordinator must invalidate before exposing a replacement account.
+ * The host injects one account lease from its retained MessagingExecution runtime.
+ * Session coordinator must invalidate before exposing a replacement account.
  */
 public final class MessagingController {
-    private final Object gate = new Object();
+    private final Object gate;
+    private final MessagingExecution.AccountLease execution;
+    private final MessagingRouter router;
     private final UUID userId;
     private final UUID epoch;
     private final ConversationRepository repository;
-    private final Executor dispatchExecutor;
     private final MessagingLogic logic = new MessagingLogic(new HashMap<>());
     private final Map<String, Operation> operations = new LinkedHashMap<>();
     private final Map<Long, Ticket<?>> pending = new LinkedHashMap<>();
+    private final Map<String, DirectOperation> pendingDirect = new HashMap<>();
     private final Set<ViewSubscription> observers = new HashSet<>();
     private long nextTicket;
     private boolean active = true;
 
-    public MessagingController(UUID userId, UUID epoch, ConversationRepository repository) {
-        this(userId, epoch, repository, Runnable::run);
-    }
-
-    public MessagingController(UUID userId, UUID epoch, ConversationRepository repository, Executor dispatchExecutor) {
+    public MessagingController(UUID userId, UUID epoch, ConversationRepository repository,
+                               MessagingExecution.AccountLease execution) {
         this.userId = Objects.requireNonNull(userId);
         this.epoch = Objects.requireNonNull(epoch);
         this.repository = Objects.requireNonNull(repository);
-        this.dispatchExecutor = Objects.requireNonNull(dispatchExecutor);
+        this.execution = Objects.requireNonNull(execution);
+        this.gate = execution.gate;
+        this.router = new MessagingRouter(userId, epoch, gate);
+        execution.bind(userId, epoch, this::invalidate);
+    }
+
+    public MessagingRouter getRouter() { return router; }
+
+    /**
+     * Every command owns an intent, not a repository request. Superseded callers still receive
+     * the operation result; only the latest intent can navigate. Each caller owns its future:
+     * cancelling/completing that future neither cancels shared work nor controls navigation.
+     * Standard future completion runs on this account's reserved settlement workers.
+     */
+    public CompletionStage<Conversation> openDirectAndNavigate(String peerUserId) {
+        return direct(peerUserId, true);
+    }
+
+    private CompletionStage<Conversation> direct(String peer, boolean navigate) {
+        Objects.requireNonNull(peer);
+        DirectOperation operation;
+        Ticket<Conversation> caller;
+        boolean created;
+        synchronized (gate) {
+            if (!active) { operation = null; caller = null; created = false; }
+            else {
+                operation = pendingDirect.get(peer);
+                created = operation == null;
+                if (!execution.admitLocked(created)) return failed(capacity());
+                if (created) {
+                    operation = new DirectOperation(peer);
+                    operation.resource = execution.operationLocked();
+                    pendingDirect.put(peer, operation);
+                }
+                if (navigate) operation.intent = router.beginDirect();
+                caller = reserveLocked(false);
+                operation.callers.add(caller);
+            }
+        }
+        if (caller == null) return failed(inactive());
+        if (created) dispatchDirect(operation);
+        return caller.future;
+    }
+
+    private void dispatchDirect(DirectOperation operation) {
+        try {
+            execution.dispatch(operation.resource, () -> {
+                synchronized (gate) {
+                    if (!active || pendingDirect.get(operation.peer) != operation || operation.dispatched) return;
+                    operation.dispatched = true;
+                }
+                try {
+                    operation.resource.source(() -> repository.openDirect(operation.peer)).whenComplete(
+                            (value, error) -> finishDirect(operation, value, error));
+                } catch (RuntimeException error) { finishDirect(operation, null, error); }
+            }, error -> finishDirect(operation, null, error));
+        } catch (RuntimeException error) { finishDirect(operation, null, error); }
+    }
+
+    private void finishDirect(DirectOperation operation, Conversation value, Throwable error) {
+        if (error == null && value == null) error = new IllegalArgumentException("Missing conversation");
+        List<Ticket<Conversation>> callers;
+        boolean routeChanged = false;
+        synchronized (gate) {
+            if (!active || pendingDirect.get(operation.peer) != operation) return;
+            pendingDirect.remove(operation.peer);
+            if (error == null) routeChanged = router.completeDirectLocked(
+                    operation.intent, value.getId(), value.getTitle());
+            callers = new ArrayList<>(operation.callers);
+            operation.callers.clear();
+            for (Ticket<Conversation> ticket : callers) {
+                ticket.value = value;
+                ticket.error = error;
+                ticket.reconciled = true;
+            }
+        }
+        if (routeChanged) router.publish();
+        for (Ticket<Conversation> ticket : callers) deliver(ticket);
     }
 
     public UUID getCurrentUserId() { return userId; }
@@ -104,16 +179,16 @@ public final class MessagingController {
     }
 
     public CompletionStage<List<Conversation>> listConversations() {
-        return request(repository::listConversations,
+        return request(resource -> resource.source(repository::listConversations),
                 rows -> Collections.unmodifiableList(new ArrayList<>(rows)));
     }
 
     public CompletionStage<Conversation> openDirect(String peerUserId) {
-        return request(() -> repository.openDirect(peerUserId), Function.identity());
+        return direct(peerUserId, false);
     }
 
     public CompletionStage<List<OutboxEntry>> loadMessages(String conversationId) {
-        return request(() -> MessagingLogic.load(repository, conversationId),
+        return request(resource -> MessagingLogic.load(repository, conversationId, resource),
                 rows -> mergeLocalLocked(conversationId, rows));
     }
 
@@ -138,11 +213,16 @@ public final class MessagingController {
                     }
                 }
                 if (rejection == null) {
+                    // Validation and draft snapshot stay atomic with invalidation, before admission.
+                    // Preserve the synchronous IllegalArgumentException for an invalid identifier.
                     Message message = new Message(UUID.randomUUID().toString(), conversationId,
                             userId.toString(), MessageType.TEXT, text);
-                    operation = new Operation(message, revision);
-                    operations.put(message.getClientMessageId(), operation);
-                    ticket = reserveSendLocked(operation, false);
+                    if (!execution.admitLocked(true)) rejection = capacity();
+                    else {
+                        operation = new Operation(message, revision);
+                        operations.put(message.getClientMessageId(), operation);
+                        ticket = reserveSendLocked(operation, false);
+                    }
                 }
             }
         }
@@ -159,6 +239,7 @@ public final class MessagingController {
             operation = operations.get(clientMessageId);
             if (!active) rejection = inactive();
             else if (!retryEligibleLocked(operation)) rejection = new IllegalStateException("Retry not eligible");
+            else if (!execution.admitLocked(true)) rejection = capacity();
             else ticket = reserveSendLocked(operation, true);
         }
         if (rejection != null) return failed(rejection);
@@ -168,7 +249,7 @@ public final class MessagingController {
 
     private Ticket<OutboxEntry> reserveSendLocked(Operation operation, boolean retry) {
         if (!logic.begin(operation.message, retry)) throw new IllegalStateException("Send in flight");
-        Ticket<OutboxEntry> ticket = reserveLocked();
+        Ticket<OutboxEntry> ticket = reserveLocked(true);
         operation.attempt = ticket;
         operation.inFlight = true;
         operation.failure = null;
@@ -180,7 +261,7 @@ public final class MessagingController {
     private void dispatchSend(Operation operation, Ticket<OutboxEntry> ticket) {
         executeDispatch(ticket, () -> {
             try {
-                repository.send(operation.message).whenComplete(
+                ticket.resource.source(() -> repository.send(operation.message)).whenComplete(
                         (entry, error) -> finishSend(operation, ticket, entry, error));
             } catch (RuntimeException error) { finishSend(operation, ticket, null, error); }
         }, error -> finishSend(operation, ticket, null, error));
@@ -215,13 +296,16 @@ public final class MessagingController {
         deliver(ticket);
     }
 
-    private <T, R> CompletionStage<R> request(Supplier<CompletionStage<T>> work, Function<T, R> apply) {
+    private <T, R> CompletionStage<R> request(Function<MessagingExecution.AccountLease.RepositoryOperation, CompletionStage<T>> work, Function<T, R> apply) {
         Ticket<R> ticket;
-        synchronized (gate) { ticket = active ? reserveLocked() : null; }
-        if (ticket == null) return failed(inactive());
+        synchronized (gate) {
+            if (!active) return failed(inactive());
+            if (!execution.admitLocked(true)) return failed(capacity());
+            ticket = reserveLocked(true);
+        }
         executeDispatch(ticket, () -> {
             try {
-                work.get().whenComplete((value, error) -> finishRequest(ticket, value, error, apply));
+                work.apply(ticket.resource).whenComplete((value, error) -> finishRequest(ticket, value, error, apply));
             } catch (RuntimeException error) { finishRequest(ticket, null, error, apply); }
         }, error -> finishRequest(ticket, null, error, apply));
         return ticket.future;
@@ -240,8 +324,9 @@ public final class MessagingController {
         deliver(ticket);
     }
 
-    private <T> Ticket<T> reserveLocked() {
+    private <T> Ticket<T> reserveLocked(boolean operation) {
         Ticket<T> ticket = new Ticket<>(++nextTicket);
+        if (operation) ticket.resource = execution.operationLocked();
         pending.put(ticket.id, ticket);
         return ticket;
     }
@@ -262,41 +347,35 @@ public final class MessagingController {
     private void executeDispatch(Ticket<?> ticket, Runnable dispatch,
                                  java.util.function.Consumer<RuntimeException> rejected) {
         try {
-            dispatchExecutor.execute(() -> {
+            execution.dispatch(ticket.resource, () -> {
                 if (claimDispatch(ticket)) dispatch.run();
-            });
+            }, rejected);
         } catch (RuntimeException error) { rejected.accept(error); }
     }
 
     private <T> void deliver(Ticket<T> ticket) {
-        T value;
-        Throwable error;
         synchronized (gate) {
-            if (!currentLocked(ticket) || !ticket.reconciled || ticket.deliveryClaimed) return;
-            ticket.deliveryClaimed = true;
-            value = ticket.value;
-            error = ticket.error;
-            pending.remove(ticket.id);
-            ticket.value = null;
-            ticket.error = null;
+            if (!currentLocked(ticket) || !ticket.reconciled || ticket.queued) return;
+            ticket.queued = true;
+            execution.readyLocked(ticket);
         }
-        // Delivery is claimed before invalidation can close acceptance. Already claimed delivery
-        // can finish afterwards; UI bindings must check current scope. No controller reference
-        // retains a completed future/Throwable while a slow continuation occupies this thread.
-        // Never move either completion call into gate.
-        if (error == null) ticket.future.complete(value);
-        else ticket.future.completeExceptionally(error);
     }
 
     /** Idempotent. State closes before any external cancellation delivery runs. */
-    public void invalidate() {
+    public void invalidate() { invalidate(epoch); }
+
+    public void invalidate(UUID expectedEpoch) {
+        if (!epoch.equals(expectedEpoch)) return;
         List<Ticket<?>> cancelled;
         List<ViewSubscription> terminal;
         synchronized (gate) {
             if (!active) return;
             active = false;
+            router.invalidateLocked();
             cancelled = new ArrayList<>(pending.values());
             pending.clear();
+            for (DirectOperation operation : pendingDirect.values()) operation.callers.clear();
+            pendingDirect.clear();
             logic.clear();
             operations.clear();
             terminal = new ArrayList<>(observers);
@@ -304,16 +383,21 @@ public final class MessagingController {
             for (ViewSubscription subscription : terminal) {
                 subscription.invalidated = true;
                 subscription.listener = null;
-                if (subscription.onInvalidated == null) subscription.closeLocked();
             }
             for (Ticket<?> ticket : cancelled) {
                 ticket.value = null;
-                ticket.error = null;
+                ticket.error = inactive();
+                ticket.reconciled = true;
+                if (!ticket.queued) {
+                    ticket.queued = true;
+                    execution.readyLocked(ticket);
+                }
             }
+            execution.closeLocked();
         }
-        // A continuation can occupy this caller thread, but no state lock is held.
-        for (Ticket<?> ticket : cancelled) ticket.future.completeExceptionally(inactive());
-        for (ViewSubscription subscription : terminal) subscription.signal();
+        // Terminal notices bypass the normal observer drain and reserved settlements.
+        // Observer executors must provide nonblocking handoff (the View uses Handler.post).
+        for (ViewSubscription subscription : terminal) subscription.signalTerminal();
     }
 
     /** Atomic registration: a closed scope returns a closed handle, never throws for that race. */
@@ -386,18 +470,43 @@ public final class MessagingController {
         return future;
     }
 
-    private static final class Ticket<T> {
+    private static RejectedExecutionException capacity() {
+        return new RejectedExecutionException("Messaging account capacity exhausted");
+    }
+
+    private final class Ticket<T> implements MessagingExecution.Settlement {
         final long id;
         final CompletableFuture<T> future = new CompletableFuture<>();
-        boolean dispatched;
-        boolean reconciled;
-        boolean deliveryClaimed;
+        MessagingExecution.AccountLease.RepositoryOperation resource;
+        boolean dispatched, reconciled, deliveryClaimed, queued;
         T value;
         Throwable error;
         Ticket(long id) { this.id = id; }
+        @Override public void settle() {
+            T result;
+            Throwable failure;
+            synchronized (gate) {
+                if (deliveryClaimed) throw new AssertionError("Duplicate terminal settlement");
+                deliveryClaimed = true;
+                result = value; failure = error;
+                pending.remove(id);
+                value = null; error = null;
+            }
+            if (failure == null) future.complete(result);
+            else future.completeExceptionally(failure);
+        }
     }
 
-    private static final class Operation {
+    private final class DirectOperation {
+        MessagingExecution.AccountLease.RepositoryOperation resource;
+        final String peer;
+        final List<Ticket<Conversation>> callers = new ArrayList<>();
+        long intent = -1;
+        boolean dispatched;
+        DirectOperation(String peer) { this.peer = peer; }
+    }
+
+    private final class Operation {
         final Message message;
         final long draftRevision;
         Ticket<OutboxEntry> attempt;
@@ -434,6 +543,7 @@ public final class MessagingController {
         private Runnable listener;
         private Runnable onInvalidated;
         private boolean invalidated;
+        private boolean normalFailed;
         private boolean closed;
         private boolean dirty;
         private boolean scheduled;
@@ -445,13 +555,35 @@ public final class MessagingController {
         }
 
         public boolean isOpen() {
-            synchronized (gate) { return !closed && !invalidated; }
+            synchronized (gate) { return !closed && !invalidated && !normalFailed; }
+        }
+
+        private void signalTerminal() {
+            Executor delivery;
+            synchronized (gate) {
+                if (closed) return;
+                delivery = executor;
+            }
+            try {
+                delivery.execute(() -> {
+                    Runnable terminal;
+                    synchronized (gate) {
+                        if (closed) return;
+                        // Terminal claim and explicit close serialize on gate. Close before claim
+                        // suppresses delivery; close after claim cannot recall this detached callback.
+                        terminal = onInvalidated;
+                        closeLocked();
+                    }
+                    try { if (terminal != null) terminal.run(); }
+                    catch (RuntimeException ignored) { /* detached terminal */ }
+                });
+            } catch (RuntimeException rejected) { close(); }
         }
 
         private void signal() {
             Executor delivery;
             synchronized (gate) {
-                if (closed || (!active && !invalidated)) return;
+                if (closed || normalFailed || !active) return;
                 dirty = true;
                 if (scheduled) return;
                 scheduled = true;
@@ -465,17 +597,29 @@ public final class MessagingController {
             while (true) {
                 Runnable callback;
                 synchronized (gate) {
-                    if (closed || (!active && !invalidated) || !dirty) {
+                    if (closed || normalFailed || invalidated || !active || !dirty) {
                         scheduled = false;
                         return;
                     }
                     dirty = false;
-                    callback = invalidated ? onInvalidated : listener;
-                    if (invalidated) closeLocked();
+                    callback = listener;
                 }
                 try { if (callback != null) callback.run(); }
-                catch (RuntimeException observerFailure) { close(); return; }
+                catch (RuntimeException observerFailure) { failNormal(); return; }
                 // Reentrant changes mark dirty; keep draining without recursive inline execute.
+            }
+        }
+
+        // A failed normal renderer is no longer open for normal signals, but remains terminal-only
+        // until explicit detach or terminal claim. Failure is never an implicit detach.
+        private void failNormal() {
+            synchronized (gate) {
+                if (closed) return;
+                normalFailed = true;
+                listener = null;
+                dirty = false;
+                scheduled = false;
+                if (onInvalidated == null) closeLocked();
             }
         }
 

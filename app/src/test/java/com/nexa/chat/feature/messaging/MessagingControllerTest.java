@@ -14,10 +14,11 @@ import static org.junit.Assert.*;
 
 /** JVM lifecycle tests model detach/recreation by closing/replacing View subscriptions. */
 public class MessagingControllerTest {
+    @org.junit.After public void closeScopes() { com.nexa.chat.feature.messaging.ui.TestScopes.closeAll(); }
     private static final UUID USER = UUID.fromString("6f0cbf50-6972-4c77-9d25-01da1e0f6101");
     private final ControlledRepository repository = new ControlledRepository(USER);
     private final MessagingController controller =
-            new MessagingController(USER, UUID.randomUUID(), repository);
+            com.nexa.chat.feature.messaging.ui.TestScopes.create(USER, UUID.randomUUID(), repository);
     private final String conversation = repository.conversation;
 
     @Test public void detachDoesNotDiscardValidAck() {
@@ -115,7 +116,7 @@ public class MessagingControllerTest {
 
         UUID userB = UUID.randomUUID();
         ControlledRepository repoB = new ControlledRepository(userB);
-        MessagingController accountB = new MessagingController(userB, UUID.randomUUID(), repoB);
+        MessagingController accountB = com.nexa.chat.feature.messaging.ui.TestScopes.create(userB, UUID.randomUUID(), repoB);
         accountB.editDraft(conversation, "B private");
         long revisionB = accountB.draftRevision(conversation);
         repository.ack(0);
@@ -185,7 +186,7 @@ public class MessagingControllerTest {
         for (ChatFailure.Code code : new ChatFailure.Code[] {
                 ChatFailure.Code.UNAUTHENTICATED, ChatFailure.Code.FORBIDDEN, ChatFailure.Code.CONFLICT }) {
             ControlledRepository repo = new ControlledRepository(USER);
-            MessagingController scope = new MessagingController(USER, UUID.randomUUID(), repo);
+            MessagingController scope = com.nexa.chat.feature.messaging.ui.TestScopes.create(USER, UUID.randomUUID(), repo);
             scope.editDraft(repo.conversation, "hello");
             CompletionStage<OutboxEntry> request = scope.sendDraft(repo.conversation);
             repo.fail(0, code);
@@ -243,7 +244,7 @@ public class MessagingControllerTest {
     @Test public void sameUserNewEpochDoesNotReuseState() {
         controller.editDraft(conversation, "old draft");
         controller.invalidate();
-        MessagingController signedInAgain = new MessagingController(USER, UUID.randomUUID(),
+        MessagingController signedInAgain = com.nexa.chat.feature.messaging.ui.TestScopes.create(USER, UUID.randomUUID(),
                 new ControlledRepository(USER));
         assertEquals("", signedInAgain.draft(conversation));
         assertNotEquals(controller.getSessionEpoch(), signedInAgain.getSessionEpoch());
@@ -299,7 +300,7 @@ public class MessagingControllerTest {
                 await(releaseInvalidation);
                 return null;
             });
-            Future<?> invalidation = workers.submit(controller::invalidate);
+            Future<?> invalidation = workers.submit(() -> controller.invalidate());
             await(invalidatingInsideGate);
             Future<?> completion = workers.submit(() -> {
                 completionStarted.countDown();
@@ -329,7 +330,7 @@ public class MessagingControllerTest {
             Future<MessagingController.ViewSubscription> observing = workers.submit(() ->
                     controller.observe(Runnable::run, () -> { entered.countDown(); await(release); }));
             await(entered);
-            Future<?> invalidation = workers.submit(controller::invalidate);
+            Future<?> invalidation = workers.submit(() -> controller.invalidate());
             invalidation.get(5, TimeUnit.SECONDS);
             assertFalse(controller.isActive());
             release.countDown();
@@ -360,7 +361,7 @@ public class MessagingControllerTest {
         try {
             Future<CompletionStage<OutboxEntry>> sending = workers.submit(() -> controller.sendDraft(conversation));
             await(repository.sendEntered);
-            workers.submit(controller::invalidate).get(5, TimeUnit.SECONDS);
+            workers.submit(() -> controller.invalidate()).get(5, TimeUnit.SECONDS);
             assertFalse(controller.isActive());
             assertTrue(controller.localEntries(conversation).isEmpty());
             repository.releaseSend.countDown();
@@ -373,7 +374,7 @@ public class MessagingControllerTest {
 
     @Test public void queuedReservationIsSkippedWhenInvalidationWinsBeforeHandoff() {
         QueueExecutor dispatch = new QueueExecutor();
-        MessagingController queued = new MessagingController(USER, UUID.randomUUID(), repository, dispatch);
+        MessagingController queued = com.nexa.chat.feature.messaging.ui.TestScopes.create(USER, UUID.randomUUID(), repository, dispatch);
         queued.editDraft(conversation, "hello");
         CompletionStage<OutboxEntry> sending = queued.sendDraft(conversation);
         assertTrue(queued.isSending(conversation));
@@ -419,7 +420,7 @@ public class MessagingControllerTest {
 
     @Test public void dispatchExecutorRejectionTerminatesAttemptWithoutLosingDraft() {
         Executor rejecting = task -> { throw new RejectedExecutionException("Rejected dispatch"); };
-        MessagingController rejected = new MessagingController(USER, UUID.randomUUID(), repository, rejecting);
+        MessagingController rejected = com.nexa.chat.feature.messaging.ui.TestScopes.create(USER, UUID.randomUUID(), repository, rejecting);
         rejected.editDraft(conversation, "hello");
         assertFailure(rejected.sendDraft(conversation), RejectedExecutionException.class);
         assertEquals(0, repository.sent.size());
