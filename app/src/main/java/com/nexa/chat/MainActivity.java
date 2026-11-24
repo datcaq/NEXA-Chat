@@ -3,14 +3,16 @@ package com.nexa.chat;
 import android.os.Bundle;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
 
 public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().hide();
+        }
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
-        // Skeleton entry only. TV1 can call the same integration from the shared Nhóm tab.
-        findViewById(R.id.groups_entry).setOnClickListener(
-                view -> com.nexa.chat.feature.groups.GroupsIntegration.open(this));
     }
 }

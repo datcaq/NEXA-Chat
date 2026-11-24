@@ -44,6 +44,7 @@ dependencies {
     androidTestImplementation("androidx.test:rules:1.7.0")
     implementation(libs.appcompat)
     implementation(libs.material)
+    implementation(libs.libphonenumber)
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.ext.junit)

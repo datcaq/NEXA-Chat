@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/home_tab_messages"
+        android:icon="@drawable/ic_home_messages"
+        android:title="@string/home_messages" />
+    <item
+        android:id="@+id/home_tab_contacts"
+        android:icon="@drawable/ic_home_contacts"
+        android:title="@string/home_contacts" />
+    <item
+        android:id="@+id/home_tab_groups"
+        android:icon="@drawable/ic_home_groups"
+        android:title="@string/home_groups" />
+    <item
+        android:id="@+id/home_tab_profile"
+        android:icon="@drawable/ic_home_profile"
+        android:title="@string/home_profile" />
+</menu>
