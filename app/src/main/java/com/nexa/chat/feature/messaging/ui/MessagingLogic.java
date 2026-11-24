@@ -30,6 +30,8 @@ public final class MessagingLogic {
   if(failure==null&&entry!=null&&revision(m.getConversationId())==revision
     &&draft(m.getConversationId()).equals(m.getText()))edit(m.getConversationId(),"");
  }
+ /** Controller invalidation only; callers must hold their account gate. */
+ synchronized void clear(){drafts.clear();revisions.clear();inFlight.clear();retry.clear();}
  public static CompletionStage<List<OutboxEntry>> load(ConversationRepository repository,String id){
   return repository.listMessages(id).thenCombine(repository.listOutbox(id),(history,outbox)->merge(id,history,outbox));
  }
