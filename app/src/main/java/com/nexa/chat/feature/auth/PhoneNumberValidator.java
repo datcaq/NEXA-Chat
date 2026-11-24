@@ -4,12 +4,12 @@ import com.google.i18n.phonenumbers.NumberParseException;
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
 
-final class PhoneNumberValidator {
+public final class PhoneNumberValidator {
     private static final PhoneNumberUtil PHONE_NUMBERS = PhoneNumberUtil.getInstance();
 
     private PhoneNumberValidator() {}
 
-    static String toE164(String input, String region) {
+    public static String toE164(String input, String region) {
         String number = input.trim();
         if (!number.matches("\\+?[\\p{Nd} ().-]+")
                 || (!number.startsWith("+") && !PHONE_NUMBERS.getSupportedRegions().contains(region))) {

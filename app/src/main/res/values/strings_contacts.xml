@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_search_title">Find by phone number</string>
+    <string name="contacts_search_help">Choose a region or enter a number with its + calling code.</string>
+    <string name="contacts_region_title">Country or region</string>
+    <string name="contacts_choose_region">Choose country or region</string>
+    <string name="contacts_region_option">%1$s (+%2$d)</string>
+    <string name="contacts_phone">Phone number</string>
+    <string name="contacts_search">Search</string>
+    <string name="contacts_phone_required">Enter a phone number.</string>
+    <string name="contacts_phone_invalid">Check the phone number and its country code.</string>
+    <string name="contacts_search_initial">Search results will appear here when phone lookup is available.</string>
+    <string name="contacts_search_loading">Searching…</string>
+    <string name="contacts_search_empty">No results found.</string>
+    <string name="contacts_search_error">Could not search. Try again.</string>
+    <string name="contacts_search_unavailable">Phone lookup is not available in this build. No search was sent.</string>
+    <string name="contacts_invite">Send friend request</string>
+    <string name="contacts_friends_title">Friends</string>
+    <string name="contacts_friends_unavailable">The friends list is not connected yet.</string>
+    <string name="contacts_invitation_title">Friend requests</string>
+    <string name="contacts_received">Received</string>
+    <string name="contacts_sent">Sent</string>
+    <string name="contacts_received_unavailable">Received requests are not available yet.</string>
+    <string name="contacts_sent_unavailable">Sent requests are not available yet.</string>
+</resources>
