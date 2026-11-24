@@ -15,11 +15,22 @@ public final class GroupsIntegration {
     public final GroupRepository groups;
     public final PeopleDirectory people;
     public final ChatNavigator chat;
+    public final GroupsAccountScope scope;
 
-    public Dependencies(GroupRepository groups, PeopleDirectory people, ChatNavigator chat) {
-      this.groups = groups;
-      this.people = people;
+    public Dependencies(
+        GroupRepository groups,
+        PeopleDirectory people,
+        ChatNavigator chat,
+        GroupsAccountScope scope) {
+      this.groups = java.util.Objects.requireNonNull(groups);
+      this.people = java.util.Objects.requireNonNull(people);
       this.chat = chat;
+      this.scope = java.util.Objects.requireNonNull(scope);
+      if (!scope.userId().toString().equals(people.currentUserId()))
+        throw new IllegalArgumentException(
+            "Directory identity must match the Groups account scope");
+      scope.own(groups::close);
+      scope.own(people::close);
     }
   }
 
@@ -27,8 +38,23 @@ public final class GroupsIntegration {
 
   private GroupsIntegration() {}
 
-  public static void install(Dependencies value) {
-    dependencies = value;
+  public static synchronized void install(Dependencies value) {
+    Dependencies previous = dependencies;
+    if (previous == value) return;
+    if (previous != null && value != null && previous.scope == value.scope)
+      throw new IllegalArgumentException(
+          "Reuse existing dependencies while refreshing the same scope");
+    dependencies = null;
+    if (previous != null) {
+      try {
+        previous.scope.close();
+      } catch (RuntimeException e) {
+        if (value != null) value.scope.close();
+        throw e;
+      }
+    }
+    if (value != null && value.scope.isCurrent()) dependencies = value;
+    else if (value != null) value.scope.close();
   }
 
   public static Dependencies get() {

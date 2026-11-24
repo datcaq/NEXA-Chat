@@ -28,6 +28,9 @@ public class GroupsActivity extends AppCompatActivity {
   private View progress;
   private GroupRowsAdapter adapter;
   private String renderedScreen;
+  private com.nexa.chat.feature.groups.GroupsAccountScope.Registration scopeClosure;
+  private com.nexa.chat.feature.groups.GroupsAccountScope.Registration scopeAccess;
+  private androidx.appcompat.app.AlertDialog activeDialog;
 
   @Override
   protected void onCreate(Bundle state) {
@@ -53,7 +56,7 @@ public class GroupsActivity extends AppCompatActivity {
     toolbar.setNavigationContentDescription(R.string.groups_cancel);
     toolbar.setNavigationOnClickListener(v -> finish());
     dependencies = GroupsIntegration.get();
-    if (dependencies == null || dependencies.people.currentUserId() == null) {
+    if (dependencies == null || !dependencies.scope.isCurrent()) {
       progress.setVisibility(View.GONE);
       status.setText(R.string.groups_setup);
       return;
@@ -69,7 +72,8 @@ public class GroupsActivity extends AppCompatActivity {
                       @NonNull Class<T> type,
                       @NonNull SavedStateHandle handle) {
                     return type.cast(
-                        new GroupsViewModel(handle, dependencies.groups, dependencies.people));
+                        new GroupsViewModel(
+                            handle, dependencies.groups, dependencies.people, dependencies.scope));
                   }
                 })
             .get(GroupsViewModel.class);
@@ -77,11 +81,33 @@ public class GroupsActivity extends AppCompatActivity {
     list.setLayoutManager(new LinearLayoutManager(this));
     adapter = new GroupRowsAdapter();
     list.setAdapter(adapter);
+    scopeClosure =
+        dependencies.scope.onClosed(
+            () -> {
+              dismissDialog();
+              controls.removeAllViews();
+              pages.removeAllViews();
+              adapter.submitList(Collections.emptyList());
+              status.setText(R.string.groups_session_ended);
+              finish();
+            });
     vm.changed.observe(this, v -> render());
+    scopeAccess = dependencies.scope.onAccessChanged(this::render);
     if (state == null || (!vm.busy && vm.detail == null && vm.groups.isEmpty())) vm.load(0);
   }
 
   private void render() {
+    if (!dependencies.scope.isCurrent()) return;
+    boolean available = dependencies.scope.hasAccess();
+    controls.setVisibility(available ? View.VISIBLE : View.GONE);
+    pages.setVisibility(available ? View.VISIBLE : View.GONE);
+    findViewById(R.id.groups_list).setVisibility(available ? View.VISIBLE : View.GONE);
+    if (!available) {
+      dismissDialog();
+      progress.setVisibility(View.VISIBLE);
+      status.setText(R.string.groups_session_checking);
+      return;
+    }
     controls.removeAllViews();
     pages.removeAllViews();
     progress.setVisibility(vm.busy ? View.VISIBLE : View.GONE);
@@ -148,28 +174,29 @@ public class GroupsActivity extends AppCompatActivity {
                 controls,
                 R.string.groups_review,
                 () ->
-                    new MaterialAlertDialogBuilder(this)
-                        .setTitle(getString(R.string.groups_review, vm.selected().size()))
-                        .setMessage(
-                            vm.selected().isEmpty()
-                                ? getString(R.string.groups_selected_empty)
-                                : vm.selected().stream()
-                                    .map(p -> p.displayName)
-                                    .collect(java.util.stream.Collectors.joining("\n")))
-                        .setPositiveButton(android.R.string.ok, null)
-                        .show());
+                    showDialog(
+                        new MaterialAlertDialogBuilder(this)
+                            .setTitle(getString(R.string.groups_review, vm.selected().size()))
+                            .setMessage(
+                                vm.selected().isEmpty()
+                                    ? getString(R.string.groups_selected_empty)
+                                    : vm.selected().stream()
+                                        .map(p -> p.displayName)
+                                        .collect(java.util.stream.Collectors.joining("\n")))
+                            .setPositiveButton(android.R.string.ok, null)));
         selected.setText(getString(R.string.groups_review, vm.selected().size()));
         button(
             controls,
             R.string.groups_submit,
             () ->
-                new MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.groups_confirm_title)
-                    .setMessage(
-                        getString(R.string.groups_confirm, vm.name().trim(), vm.selected().size()))
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .setPositiveButton(R.string.groups_submit, (d, w) -> vm.create())
-                    .show());
+                showDialog(
+                    new MaterialAlertDialogBuilder(this)
+                        .setTitle(R.string.groups_confirm_title)
+                        .setMessage(
+                            getString(
+                                R.string.groups_confirm, vm.name().trim(), vm.selected().size()))
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .setPositiveButton(R.string.groups_submit, (d, w) -> vm.create())));
         for (Person p : vm.people) {
           boolean eligible = p.eligible && !p.id.equals(dependencies.people.currentUserId());
           String label =
@@ -201,7 +228,8 @@ public class GroupsActivity extends AppCompatActivity {
               () -> {
                 if (dependencies.chat == null)
                   Toast.makeText(this, R.string.groups_chat_missing, Toast.LENGTH_LONG).show();
-                else dependencies.chat.open(this, vm.groupId());
+                else
+                  dependencies.scope.runIfCurrent(() -> dependencies.chat.open(this, vm.groupId()));
               });
         }
         break;
@@ -315,5 +343,35 @@ public class GroupsActivity extends AppCompatActivity {
 
   private int dp(int value) {
     return Math.round(value * getResources().getDisplayMetrics().density);
+  }
+
+  private void showDialog(MaterialAlertDialogBuilder builder) {
+    if (!dependencies.scope.hasAccess()) return;
+    dismissDialog();
+    activeDialog = builder.show();
+  }
+
+  private void dismissDialog() {
+    if (activeDialog != null) {
+      activeDialog.dismiss();
+      activeDialog = null;
+    }
+  }
+
+  @Override
+  protected void onStart() {
+    super.onStart();
+    if (dependencies != null && !dependencies.scope.isCurrent()) {
+      dependencies.scope.close();
+      finish();
+    } else if (dependencies != null) dependencies.scope.sessionChanged();
+  }
+
+  @Override
+  protected void onDestroy() {
+    dismissDialog();
+    if (scopeClosure != null) scopeClosure.close();
+    if (scopeAccess != null) scopeAccess.close();
+    super.onDestroy();
   }
 }

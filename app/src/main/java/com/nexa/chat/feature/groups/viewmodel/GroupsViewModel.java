@@ -1,6 +1,7 @@
 package com.nexa.chat.feature.groups.viewmodel;
 
 import androidx.lifecycle.*;
+import com.nexa.chat.feature.groups.GroupsAccountScope;
 import com.nexa.chat.feature.groups.model.GroupModels.*;
 import com.nexa.chat.feature.groups.repository.*;
 import java.util.*;
@@ -10,6 +11,8 @@ public final class GroupsViewModel extends ViewModel {
   private final SavedStateHandle saved;
   private final GroupRepository repository;
   private final PeopleDirectory directory;
+  private final GroupsAccountScope scope;
+  private final GroupsAccountScope.Registration closure;
   public boolean busy, hasNext;
   public String error = "";
   public int page;
@@ -20,33 +23,48 @@ public final class GroupsViewModel extends ViewModel {
   public Summary detail;
   private int generation;
   private boolean createFailed;
+  private boolean disposed;
 
   public GroupsViewModel(
-      SavedStateHandle saved, GroupRepository repository, PeopleDirectory directory) {
+      SavedStateHandle saved,
+      GroupRepository repository,
+      PeopleDirectory directory,
+      GroupsAccountScope scope) {
     this.saved = saved;
     this.repository = repository;
     this.directory = directory;
+    this.scope = scope;
+    if (!scope.userId().toString().equals(saved.get("scope.user"))
+        || !scope.epoch().toString().equals(saved.get("scope.epoch"))) clearSavedAccount();
+    saved.set("scope.user", scope.userId().toString());
+    saved.set("scope.epoch", scope.epoch().toString());
+    closure = scope.onClosed(this::invalidate);
   }
 
   public String screen() {
+    if (!ownsSavedAccount()) return "groups";
     return saved.get("screen") == null ? "groups" : saved.get("screen");
   }
 
   public String name() {
+    if (!ownsSavedAccount()) return "";
     String v = saved.get("name");
     return v == null ? "" : v;
   }
 
   public String query() {
+    if (!ownsSavedAccount()) return "";
     String v = saved.get("query");
     return v == null ? "" : v;
   }
 
   public String groupId() {
+    if (!ownsSavedAccount()) return null;
     return saved.get("group");
   }
 
   public void name(String value) {
+    if (!ensureScope()) return;
     if (!name().equals(value)) {
       saved.set("name", value);
       saved.set("key", null);
@@ -54,6 +72,7 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public ArrayList<Person> selected() {
+    if (!ownsSavedAccount()) return new ArrayList<>();
     ArrayList<Person> list = saved.get("selected");
     return list == null ? new ArrayList<>() : new ArrayList<>(list);
   }
@@ -63,11 +82,12 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public boolean toggle(Person person) {
-    if (busy
+    if (!ensureScope()
+        || busy
         || person == null
         || person.id == null
         || !person.eligible
-        || person.id.equals(directory.currentUserId())) return false;
+        || person.id.equals(scope.userId().toString())) return false;
     ArrayList<Person> list = selected();
     if (!list.removeIf(p -> p.id.equals(person.id))) {
       if (list.size() >= 100) {
@@ -84,7 +104,7 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public void show(String screen) {
-    if (busy) return;
+    if (!ensureScope() || busy) return;
     saved.set("screen", screen);
     page = 0;
     error = "";
@@ -95,7 +115,7 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public void search(String phone) {
-    if (busy) return;
+    if (!ensureScope() || busy) return;
     people = Collections.emptyList();
     saved.set("query", phone.trim());
     saved.set("screen", "create");
@@ -103,19 +123,20 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public void friends() {
-    if (busy) return;
+    if (!ensureScope() || busy) return;
     people = Collections.emptyList();
     saved.set("query", "");
     load(0);
   }
 
   public void retry() {
+    if (!ensureScope()) return;
     if (createFailed) create();
     else load(page);
   }
 
   public void open(String id) {
-    if (busy) return;
+    if (!ensureScope() || busy) return;
     saved.set("group", id);
     saved.set("screen", "detail");
     detail = null;
@@ -123,7 +144,7 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public void load(int requestedPage) {
-    if (busy || requestedPage < 0) return;
+    if (!ensureScope() || busy || requestedPage < 0) return;
     busy = true;
     error = "";
     createFailed = false;
@@ -201,7 +222,7 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public void create() {
-    if (busy) return;
+    if (!ensureScope() || busy) return;
     String title = name().trim();
     if (title.isEmpty() || title.length() > 120) {
       error = "INVALID_NAME";
@@ -238,7 +259,7 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   public void respond(Invitation invitation, boolean accept) {
-    if (busy) return;
+    if (!ensureScope() || busy) return;
     busy = true;
     error = "";
     int token = ++generation;
@@ -261,17 +282,23 @@ public final class GroupsViewModel extends ViewModel {
   private <T> GroupRepository.Result<T> result(int token, Apply<T> apply) {
     return new GroupRepository.Result<T>() {
       public void success(T value) {
-        if (token != generation) return;
-        apply.accept(value);
-        busy = false;
-        notifyChange();
+        scope.dispatch(
+            () -> {
+              if (token != generation || !ownsSavedAccount()) return;
+              apply.accept(value);
+              busy = false;
+              notifyChange();
+            });
       }
 
       public void failure(String code) {
-        if (token != generation) return;
-        busy = false;
-        error = code;
-        notifyChange();
+        scope.dispatch(
+            () -> {
+              if (token != generation || !ownsSavedAccount()) return;
+              busy = false;
+              error = code;
+              notifyChange();
+            });
       }
     };
   }
@@ -280,8 +307,45 @@ public final class GroupsViewModel extends ViewModel {
     changed.setValue(changed.getValue() == null ? 1 : changed.getValue() + 1);
   }
 
+  private boolean ensureScope() {
+    if (disposed) return false;
+    if (scope.hasAccess()) return ownsSavedAccount();
+    if (!scope.isCurrent()) scope.close();
+    return false;
+  }
+
+  private boolean ownsSavedAccount() {
+    return scope.userId().toString().equals(saved.get("scope.user"))
+        && scope.epoch().toString().equals(saved.get("scope.epoch"));
+  }
+
+  private void clearSavedAccount() {
+    for (String key :
+        Arrays.asList(
+            "scope.user", "scope.epoch", "screen", "name", "query", "selected", "key", "group"))
+      saved.remove(key);
+  }
+
+  private void invalidate() {
+    generation++;
+    if (ownsSavedAccount()) clearSavedAccount();
+    busy = false;
+    hasNext = false;
+    page = 0;
+    createFailed = false;
+    groups = Collections.emptyList();
+    people = Collections.emptyList();
+    invitations = Collections.emptyList();
+    members = Collections.emptyList();
+    detail = null;
+    error = "SCOPE_EXPIRED";
+    notifyChange();
+  }
+
   @Override
   protected void onCleared() {
+    disposed = true;
     generation++;
+    closure.close();
   }
 }

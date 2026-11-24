@@ -7,12 +7,40 @@ Backend lưu conversation, OWNER/ACTIVE và PENDING invitations bằng transacti
 Có kiểm quyền, khóa khi xử lý đồng thời, chống tạo nhóm trùng bằng Idempotency-Key, phân trang, giới hạn mỗi request và ngân sách thao tác.
 Không đặt giới hạn tổng số thành viên nhóm.
 
-Chưa đạt Definition of Done production end-to-end: repo gốc chỉ có skeleton, chưa có auth/danh bạ của TV1 và hội thoại của TV2.
+Chưa đạt Definition of Done production end-to-end: main mới đã có Auth UI preview và Home foundation, nhưng chưa có auth/danh bạ thật của TV1 và hội thoại production của TV2.
 Android cung cấp integration ports và Retrofit adapter thật; production không dùng fake để giả lập tìm số hoặc đăng nhập.
 Khi chưa nối adapter, màn nhóm báo chưa sẵn sàng. Backend mặc định từ chối token và trả 503 cho directory chưa cấu hình.
 PR cần review và nối các adapter trước khi đánh dấu issue hoàn tất; không tự merge.
 
-## Mã nguồn đã thay đổi
+## Cập nhật ngày 24/11/2026
+
+- Đã merge main 1945282 vào nhánh GROUP-01; giữ đúng MainActivity và activity_main.xml của TV1, bỏ entry skeleton của Groups.
+- Thêm GroupsAccountScope theo user UUID và epoch; adapter dùng latest-session access projection, không chép Session V2 chưa merge.
+- ACTIVE được thao tác; SUSPENDED cùng epoch ẩn nội dung/đóng dialog, giữ draft/retry và trì hoãn callback; EXPIRED đóng scope, hủy requests và xóa dữ liệu.
+- install(null)/đổi Dependencies đóng scope cũ, không còn chỉ xóa biến static.
+- ViewModel guard callback bằng scope, generation và saved-state owner; callback cũ không ghi vào epoch mới hoặc ViewModel đã cleared.
+- RemoteGroupRepository theo dõi/hủy Retrofit Call. PeopleDirectory adapter phải hủy requests riêng khi close, không đóng shared Contacts/client.
+- Activity unsubscribe observer khi destroy; scope đóng thì dọn nội dung và finish Activity cũ.
+- Thêm GroupsAccountScopeTest, GroupsIntegrationTest và tests logout/refresh/late callback/account switch ở unit và androidTest.
+- Bổ sung session-v2-integration.md và backend-baseline-proposal.md để TV1/TV2 review. Chưa tách backend hoặc sửa schema/migration.
+
+Đã chạy trong lần cập nhật này:
+
+| Lệnh | Kết quả thực tế |
+|---|---|
+| backend: mvn -B verify | 25 đạt, 0 lỗi/bỏ qua; có 13 PostgreSQL integration tests thật |
+| gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest | Build APK và test APK đạt; 37 unit tests đạt (30 Groups + 7 baseline/Auth/Home) |
+| UI tests mới | Đã biên dịch thành test APK; chưa chạy được do emulator không boot tới trạng thái ADB online |
+
+Lần thử emulator ban đầu bị chặn bởi ổ C còn khoảng 0,9 GB, sau đó bởi Windows commit memory.
+Đã thử AVD test riêng trên ổ D, giảm RAM và giải phóng Docker/Gradle do tác vụ khởi động; AVD vẫn offline.
+Không sửa hoặc xóa AVD gốc. Kết quả UI ngày 22/11 bên dưới là lịch sử, không phải kết quả của code lifecycle mới.
+Không dùng build/test APK thành công để thay cho kết quả chạy UI.
+Khi có thiết bị online, cần chạy gradlew.bat :app:connectedDebugAndroidTest trước khi approve phần UI lifecycle.
+
+Chi tiết contract và phạm vi chờ duyệt: [Session V2](session-v2-integration.md), [backend baseline](backend-baseline-proposal.md).
+
+## Mã nguồn của lần triển khai đầu
 
 Các file chung được sửa có giới hạn:
 
@@ -44,7 +72,7 @@ Các thành phần mới:
 Chi tiết schema, endpoint, JSON mẫu và cách nối TV1/TV2 nằm trong [hợp đồng triển khai](README.md).
 Không đưa hai tài liệu Word nội bộ vào GitHub.
 
-## Kiểm thử thực tế
+## Kiểm thử lần đầu ngày 22/11/2026
 
 Môi trường kiểm tra ngày 22/11/2026:
 

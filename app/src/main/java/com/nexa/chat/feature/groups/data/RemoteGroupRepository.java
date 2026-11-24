@@ -7,23 +7,50 @@ import retrofit2.*;
 /** Uses TV1's authenticated Retrofit client. No token storage or auth implementation here. */
 public final class RemoteGroupRepository implements GroupRepository {
   private final GroupApi api;
+  private final java.util.Set<Call<?>> calls = new java.util.HashSet<>();
+  private boolean closed;
 
   public RemoteGroupRepository(GroupApi api) {
     this.api = api;
   }
 
-  private <T> void run(Call<T> call, Result<T> callback) {
+  private synchronized <T> void run(Call<T> call, Result<T> callback) {
+    if (closed) {
+      call.cancel();
+      return;
+    }
+    calls.add(call);
     call.enqueue(
         new Callback<T>() {
           public void onResponse(Call<T> c, Response<T> r) {
+            synchronized (RemoteGroupRepository.this) {
+              calls.remove(c);
+              if (closed) return;
+            }
             if (r.isSuccessful() && r.body() != null) callback.success(r.body());
             else callback.failure("HTTP_" + r.code());
           }
 
           public void onFailure(Call<T> c, Throwable t) {
+            synchronized (RemoteGroupRepository.this) {
+              calls.remove(c);
+              if (closed) return;
+            }
             callback.failure("NETWORK_ERROR");
           }
         });
+  }
+
+  @Override
+  public void close() {
+    java.util.List<Call<?>> pending;
+    synchronized (this) {
+      if (closed) return;
+      closed = true;
+      pending = new java.util.ArrayList<>(calls);
+      calls.clear();
+    }
+    for (Call<?> call : pending) call.cancel();
   }
 
   public void groups(int p, Result<Page<Summary>> c) {

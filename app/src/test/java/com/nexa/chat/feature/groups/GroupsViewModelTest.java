@@ -15,11 +15,15 @@ public class GroupsViewModelTest {
   TestGroups repository;
   GroupsViewModel vm;
   SavedStateHandle saved;
+  final UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  GroupsAccountScope scope;
   PeopleDirectory directory =
       new PeopleDirectory() {
         public String currentUserId() {
-          return "me";
+          return userId.toString();
         }
+
+        public void close() {}
 
         public void friends(int p, GroupRepository.Result<Page<Person>> c) {
           Page<Person> page = new Page<>();
@@ -36,7 +40,10 @@ public class GroupsViewModelTest {
   public void setup() {
     repository = new TestGroups();
     saved = new SavedStateHandle();
-    vm = new GroupsViewModel(saved, repository, directory);
+    scope =
+        new GroupsAccountScope(
+            userId, UUID.randomUUID(), () -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
+    vm = new GroupsViewModel(saved, repository, directory, scope);
   }
 
   @Test
@@ -54,7 +61,7 @@ public class GroupsViewModelTest {
     assertEquals(1, vm.selected().size());
     vm.toggle(new Person("friend", "Same user", true));
     assertTrue(vm.selected().isEmpty());
-    assertFalse(vm.toggle(new Person("me", "Me", true)));
+    assertFalse(vm.toggle(new Person(userId.toString(), "Me", true)));
     assertFalse(vm.toggle(new Person("blocked", "Blocked", false)));
   }
 
@@ -108,7 +115,7 @@ public class GroupsViewModelTest {
     vm.toggle(new Person("friend", "Friend", true));
     vm.create();
     String key = repository.key;
-    GroupsViewModel restored = new GroupsViewModel(saved, repository, directory);
+    GroupsViewModel restored = new GroupsViewModel(saved, repository, directory, scope);
     restored.create();
     assertEquals("Study", restored.name());
     assertEquals(1, restored.selected().size());
@@ -124,7 +131,136 @@ public class GroupsViewModelTest {
     assertFalse(vm.busy);
   }
 
+  @Test
+  public void logoutClearsDraftSelectionAndRejectsLateCreateSuccess() {
+    vm.name("Private draft");
+    vm.toggle(new Person("friend", "Friend", true));
+    vm.create();
+    GroupRepository.Result<Created> oldCallback = repository.pending;
+    scope.close();
+    assertEquals("", vm.name());
+    assertTrue(vm.selected().isEmpty());
+    assertNull(vm.groupId());
+    assertFalse(vm.busy);
+    assertTrue(vm.groups.isEmpty());
+    assertEquals("SCOPE_EXPIRED", vm.error);
+    int version = vm.changed.getValue();
+    Created stale = new Created();
+    stale.group = new Summary();
+    stale.group.conversation = new Conversation();
+    stale.group.conversation.id = "old-group";
+    oldCallback.success(stale);
+    oldCallback.failure("NETWORK_ERROR");
+    assertEquals(version, (int) vm.changed.getValue());
+    assertNull(vm.groupId());
+    vm.name("should not persist");
+    vm.create();
+    assertEquals("", vm.name());
+    assertEquals(1, repository.submissions);
+  }
+
+  @Test
+  public void newEpochCannotRestoreOldAccountDraftOrRetryKey() {
+    vm.name("Private draft");
+    vm.toggle(new Person("friend", "Friend", true));
+    vm.create();
+    GroupsAccountScope replacement =
+        new GroupsAccountScope(
+            userId, UUID.randomUUID(), () -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
+    GroupsViewModel restored = new GroupsViewModel(saved, new TestGroups(), directory, replacement);
+    assertEquals("", restored.name());
+    assertTrue(restored.selected().isEmpty());
+    assertNull(saved.get("key"));
+    restored.name("New private draft");
+    scope.close();
+    assertEquals("New private draft", restored.name());
+    assertEquals("", vm.name());
+  }
+
+  @Test
+  public void directoryResponseQueuedBeforeLogoutCannotRepopulatePeople() {
+    final GroupRepository.Result<Page<Person>>[] pending = new GroupRepository.Result[1];
+    PeopleDirectory delayed =
+        new PeopleDirectory() {
+          public String currentUserId() {
+            return userId.toString();
+          }
+
+          public void friends(int page, GroupRepository.Result<Page<Person>> callback) {
+            pending[0] = callback;
+          }
+
+          public void searchPhone(
+              String query, int page, GroupRepository.Result<Page<Person>> callback) {
+            pending[0] = callback;
+          }
+
+          public void close() {}
+        };
+    GroupsViewModel target =
+        new GroupsViewModel(new SavedStateHandle(), repository, delayed, scope);
+    target.show("create");
+    scope.close();
+    Page<Person> response = new Page<>();
+    response.items = List.of(new Person("old-user", "Private profile", true));
+    pending[0].success(response);
+    assertTrue(target.people.isEmpty());
+    assertEquals("SCOPE_EXPIRED", target.error);
+  }
+
+  @Test
+  public void clearingViewModelRejectsLateCallbackWithinSameAccount() {
+    vm.name("Keep draft");
+    vm.create();
+    androidx.lifecycle.ViewModelStore store = new androidx.lifecycle.ViewModelStore();
+    store.put("groups", vm);
+    store.clear();
+    int version = vm.changed.getValue();
+    repository.pending.failure("NETWORK_ERROR");
+    assertEquals(version, (int) vm.changed.getValue());
+    assertEquals("Keep draft", vm.name());
+    vm.name("late edit");
+    assertEquals("Keep draft", vm.name());
+  }
+
+  @Test
+  public void transientRefreshSuspendsDeliveryWithoutLosingDraftOrRetryKey() {
+    java.util.concurrent.atomic.AtomicReference<GroupsAccountScope.Access> access =
+        new java.util.concurrent.atomic.AtomicReference<>(GroupsAccountScope.Access.ACTIVE);
+    GroupsAccountScope refreshing =
+        new GroupsAccountScope(userId, UUID.randomUUID(), access::get, Runnable::run);
+    TestGroups remote = new TestGroups();
+    GroupsViewModel target =
+        new GroupsViewModel(new SavedStateHandle(), remote, directory, refreshing);
+    target.name("Keep on refresh");
+    target.create();
+    String key = remote.key;
+    access.set(GroupsAccountScope.Access.SUSPENDED);
+    refreshing.sessionChanged();
+    remote.pending.failure("NETWORK_ERROR");
+    assertEquals("Keep on refresh", target.name());
+    assertTrue(target.busy);
+    assertEquals("", target.error);
+    assertTrue(refreshing.isCurrent());
+    assertFalse(refreshing.hasAccess());
+    target.create();
+    assertEquals(1, remote.submissions);
+    access.set(GroupsAccountScope.Access.ACTIVE);
+    refreshing.sessionChanged();
+    assertFalse(target.busy);
+    assertEquals("NETWORK_ERROR", target.error);
+    target.retry();
+    assertEquals(key, remote.key);
+    assertEquals(2, remote.submissions);
+  }
+
   static class TestGroups implements GroupRepository {
+    boolean closed;
+
+    public void close() {
+      closed = true;
+    }
+
     int submissions;
     String key;
     Create request;

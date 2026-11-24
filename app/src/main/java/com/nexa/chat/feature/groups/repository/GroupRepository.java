@@ -2,7 +2,11 @@ package com.nexa.chat.feature.groups.repository;
 
 import com.nexa.chat.feature.groups.model.GroupModels.*;
 
-public interface GroupRepository {
+public interface GroupRepository extends AutoCloseable {
+  /** Idempotent; cancel owned requests. Already admitted callbacks still require an epoch guard. */
+  @Override
+  void close();
+
   interface Result<T> {
     void success(T value);
 

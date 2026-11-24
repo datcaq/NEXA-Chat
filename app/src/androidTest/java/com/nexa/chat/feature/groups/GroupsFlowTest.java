@@ -23,6 +23,9 @@ import org.junit.runner.RunWith;
 public class GroupsFlowTest {
   Fixture groups;
   PeopleDirectory people;
+  final UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  GroupsAccountScope scope;
+  java.util.concurrent.atomic.AtomicReference<GroupsAccountScope.Access> access;
 
   @Before
   public void setup() {
@@ -30,8 +33,10 @@ public class GroupsFlowTest {
     people =
         new PeopleDirectory() {
           public String currentUserId() {
-            return "owner";
+            return userId.toString();
           }
+
+          public void close() {}
 
           public void friends(int p, GroupRepository.Result<Page<Person>> c) {
             Page<Person> page = new Page<>();
@@ -45,7 +50,18 @@ public class GroupsFlowTest {
             c.success(page);
           }
         };
-    GroupsIntegration.install(new GroupsIntegration.Dependencies(groups, people, null));
+    android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    access = new java.util.concurrent.atomic.AtomicReference<>(GroupsAccountScope.Access.ACTIVE);
+    scope =
+        new GroupsAccountScope(
+            userId,
+            UUID.randomUUID(),
+            access::get,
+            task -> {
+              if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) task.run();
+              else main.post(task);
+            });
+    GroupsIntegration.install(new GroupsIntegration.Dependencies(groups, people, null, scope));
   }
 
   @After
@@ -96,11 +112,9 @@ public class GroupsFlowTest {
   }
 
   @Test
-  public void skeletonOpensGroupsWithoutInventingAuthentication() {
+  public void missingScopeDoesNotInventAuthentication() {
     GroupsIntegration.install(null);
-    try (ActivityScenario<com.nexa.chat.MainActivity> ignored =
-        ActivityScenario.launch(com.nexa.chat.MainActivity.class)) {
-      onView(withId(R.id.groups_entry)).perform(click());
+    try (ActivityScenario<GroupsActivity> ignored = ActivityScenario.launch(GroupsActivity.class)) {
       onView(withText(R.string.groups_setup)).check(matches(isDisplayed()));
     }
   }
@@ -123,6 +137,89 @@ public class GroupsFlowTest {
     }
   }
 
+  @Test
+  public void logoutFinishesOldGroupsActivityAndClosesRepository() {
+    try (ActivityScenario<GroupsActivity> scenario =
+        ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).perform(click());
+      onView(withId(R.id.groups_name_input))
+          .perform(replaceText("Private draft"), closeSoftKeyboard());
+      scenario.onActivity(activity -> GroupsIntegration.install(null));
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      Assert.assertEquals(androidx.lifecycle.Lifecycle.State.DESTROYED, scenario.getState());
+      Assert.assertTrue(groups.closed);
+      Assert.assertFalse(scope.isCurrent());
+    }
+  }
+
+  @Test
+  public void lateCreateResponseAfterAccountReplacementCannotReopenOldGroup() {
+    groups.delay = true;
+    try (ActivityScenario<GroupsActivity> scenario =
+        ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).perform(click());
+      onView(withId(R.id.groups_name_input))
+          .perform(replaceText("Private group"), closeSoftKeyboard());
+      onView(withText(R.string.groups_submit)).perform(click());
+      onView(withId(android.R.id.button1)).perform(click());
+      Assert.assertNotNull(groups.pending);
+      scenario.onActivity(activity -> GroupsIntegration.install(null));
+      InstrumentationRegistry.getInstrumentation()
+          .runOnMainSync(() -> groups.pending.success(groups.created()));
+      InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+      Assert.assertEquals(androidx.lifecycle.Lifecycle.State.DESTROYED, scenario.getState());
+      Assert.assertNull(GroupsIntegration.get());
+    }
+  }
+
+  @Test
+  public void newEpochDoesNotRestoreOldAccountDraftAfterRecreation() {
+    try (ActivityScenario<GroupsActivity> scenario =
+        ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).perform(click());
+      onView(withId(R.id.groups_name_input))
+          .perform(replaceText("Private draft"), closeSoftKeyboard());
+      scenario.recreate();
+      onView(withId(R.id.groups_name_input)).check(matches(withText("Private draft")));
+      scenario.onActivity(activity -> GroupsIntegration.install(null));
+    }
+    // A new authenticated scope is a new owner of all Groups dependencies and saved state.
+    setup();
+    try (ActivityScenario<GroupsActivity> next = ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).perform(click());
+      onView(withId(R.id.groups_name_input)).check(matches(withText("")));
+      onView(withText("Xem người đã chọn (0)")).check(matches(isDisplayed()));
+    }
+  }
+
+  @Test
+  public void refreshHidesPrivateContentThenRestoresSameEpochDraft() {
+    try (ActivityScenario<GroupsActivity> scenario =
+        ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).perform(click());
+      onView(withId(R.id.groups_name_input))
+          .perform(replaceText("Keep during refresh"), closeSoftKeyboard());
+      onView(withText(R.string.groups_submit)).perform(click());
+      scenario.onActivity(
+          activity -> {
+            access.set(GroupsAccountScope.Access.SUSPENDED);
+            scope.sessionChanged();
+          });
+      onView(withText(R.string.groups_session_checking)).check(matches(isDisplayed()));
+      onView(withText(R.string.groups_confirm_title)).check(doesNotExist());
+      onView(withId(R.id.groups_name_input))
+          .check(matches(org.hamcrest.Matchers.not(isDisplayed())));
+      Assert.assertFalse(groups.closed);
+      scenario.onActivity(
+          activity -> {
+            access.set(GroupsAccountScope.Access.ACTIVE);
+            scope.sessionChanged();
+          });
+      onView(withId(R.id.groups_name_input)).check(matches(withText("Keep during refresh")));
+      Assert.assertTrue(scope.hasAccess());
+    }
+  }
+
   private void capture(String name) throws Exception {
     var instrumentation = InstrumentationRegistry.getInstrumentation();
     instrumentation.waitForIdleSync();
@@ -139,9 +236,17 @@ public class GroupsFlowTest {
   }
 
   static class Fixture implements GroupRepository {
+    boolean closed;
+
+    public void close() {
+      closed = true;
+    }
+
     Create request;
     String key;
     boolean fail;
+    boolean delay;
+    Result<Created> pending;
 
     public void groups(int p, Result<Page<Summary>> c) {
       c.success(new Page<>());
@@ -150,18 +255,26 @@ public class GroupsFlowTest {
     public void create(String k, Create r, Result<Created> c) {
       key = k;
       request = r;
+      if (delay) {
+        pending = c;
+        return;
+      }
       if (fail) {
         c.failure("NETWORK_ERROR");
         return;
       }
+      c.success(created());
+    }
+
+    Created created() {
       Created v = new Created();
       v.group = new Summary();
       v.group.conversation = new Conversation();
       v.group.conversation.id = "group-1";
-      v.group.conversation.title = r.name;
+      v.group.conversation.title = request.name;
       v.group.memberCount = 1;
       v.group.myRole = "OWNER";
-      c.success(v);
+      return v;
     }
 
     public void details(String id, Result<Summary> c) {

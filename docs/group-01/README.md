@@ -3,7 +3,7 @@
 ## Status and scope
 
 This branch implements group persistence, invitation acceptance/rejection, authorization checks, pagination and Android feature screens.
-It is not a completed production end-to-end feature: the baseline has no TV1 authentication/directory implementation or TV2 chat module.
+It is not a completed production end-to-end feature: main now has Auth UI preview and Home foundation, but no TV1 production authentication/directory implementation or TV2 chat module.
 There is no production fake data or authentication bypass. Missing identity is rejected; missing directory integration returns 503.
 The PR should remain draft until the adapters and shared contracts have been reviewed.
 
@@ -99,10 +99,13 @@ Construct `RemoteGroupRepository` using `authenticatedRetrofit.create(GroupApi.c
 The shared Retrofit base URL must end with / and represent the server root; GroupApi includes api/v1.
 Use HTTPS and TV1's token refresh/revoke logic. No tokens or server URL are hardcoded by the group feature.
 
-Install `GroupsIntegration.Dependencies(repository,peopleDirectory,chatNavigator)` from the Application composition root.
-Call `GroupsIntegration.open(activity)` from the agreed Nhóm tab. Clear dependencies and close authenticated screens at logout/account change.
-Reinstall after process recreation before opening the activity; SavedStateHandle restores name, selected users, screen, group ID and retry key.
-The minimal skeleton entry in MainActivity only opens this feature; it does not create a replacement tab architecture.
+Install `GroupsIntegration.Dependencies(repository,peopleDirectory,chatNavigator,scope)` from the Application composition root.
+Scope requires a validated user UUID, local session epoch and latest-session access supplier supplied by TV1.
+Call `GroupsIntegration.open(activity)` from home_panel_groups after authentication; shared Auth/Home sources are retained from main.
+Calling install(null) or replacing dependencies invalidates the old scope, cancels owned requests, clears account state and finishes old Groups screens.
+Refresh in the same epoch suspends protected UI while validation is unavailable and retains draft/retry state; it does not invalidate the scope.
+Reinstall real adapters after process recreation before opening the activity. SavedStateHandle restores drafts/keys only for the same user and epoch.
+See [Session V2 integration](session-v2-integration.md) for the required latest-snapshot mapping, cancellation and coordinator responsibilities.
 
 ## TV1 backend integration
 
@@ -110,7 +113,7 @@ The minimal skeleton entry in MainActivity only opens this feature; it does not 
 - Require a real existing user row for the caller and every invitee. Do not provision users from group requests.
 - Configure NEXA_AUTH_ISSUER and NEXA_AUTH_AUDIENCE or integrate TV1's verified JwtDecoder and shared security configuration.
 - Agree on the initial users identity table and evolve it through additional migrations. No phone/profile search endpoints were invented here.
-- Review the shared Gradle additions, manifest entry/Internet permission, skeleton launch button and dedicated feature theme.
+- Review the shared Gradle additions, manifest entry/Internet permission, dedicated feature theme and proposed Home mount. No skeleton launch button remains.
 
 ## TV2 integration
 
