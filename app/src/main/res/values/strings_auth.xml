@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_brand">NEXA Chat</string>
+    <string name="auth_sign_in">Sign in</string>
+    <string name="auth_register">Create an account</string>
+    <string name="auth_phone_description">Select a country or enter a number starting with + and its country code.</string>
+    <string name="auth_country">Country or region</string>
+    <string name="auth_country_option">%1$s (+%2$d)</string>
+    <string name="auth_phone">Phone number</string>
+    <string name="auth_continue">Continue</string>
+    <string name="auth_switch_register">Create an account</string>
+    <string name="auth_switch_sign_in">I already have an account</string>
+    <string name="auth_change_number">Change phone number</string>
+    <string name="auth_error_country">Select a country or enter an international number.</string>
+    <string name="auth_error_phone_required">Enter your phone number.</string>
+    <string name="auth_error_phone_invalid">Check the phone number and country code.</string>
+    <string name="auth_otp_title">Verify phone number</string>
+    <string name="auth_otp_description">Preview only. Use sample digits to see the form response.</string>
+    <string name="auth_otp">Sample verification code</string>
+    <string name="auth_error_otp">Enter a sample code using digits.</string>
+    <string name="auth_verify_preview">Preview verification</string>
+    <string name="auth_loading">Loading</string>
+    <string name="auth_sign_in_pending">Phone number format is valid. Sign-in is pending the authentication setup.</string>
+    <string name="auth_otp_preview">No text message was sent.</string>
+    <string name="auth_verification_pending">This preview does not verify codes or create accounts.</string>
+</resources>
