@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_unavailable">Not available yet</string>
+    <string name="home_brand" translatable="false">NEXA Chat</string>
+    <string name="home_messages">Messages</string>
+    <string name="home_unavailable_messages">Conversations will appear here once messaging is connected.</string>
+    <string name="home_contacts">Contacts</string>
+    <string name="home_unavailable_contacts">Search and manage contacts once the directory is connected.</string>
+    <string name="home_groups">Groups</string>
+    <string name="home_unavailable_groups">Group conversations and invitations will appear here when available.</string>
+    <string name="home_profile">Profile</string>
+    <string name="home_unavailable_profile">Your profile and preferences will be available once the account module is connected.</string>
+</resources>
