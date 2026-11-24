@@ -23,4 +23,10 @@
     <string name="auth_sign_in_pending">Phone number format is valid. Sign-in is pending the authentication setup.</string>
     <string name="auth_otp_preview">No text message was sent.</string>
     <string name="auth_verification_pending">This preview does not verify codes or create accounts.</string>
+    <string name="auth_challenge_description">Your registration challenge is ready. Verification is unavailable in this build.</string>
+    <string name="auth_verify">Verify</string>
+    <string name="auth_verification_code">Verification code</string>
+    <string name="auth_challenge_unavailable">The service is unavailable. Check your connection and try again.</string>
+    <string name="auth_challenge_rate_limited">Too many requests. Wait before trying again.</string>
+    <string name="auth_challenge_rejected">The verification request could not be accepted.</string>
 </resources>

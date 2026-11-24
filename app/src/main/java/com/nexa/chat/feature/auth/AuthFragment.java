@@ -1,6 +1,8 @@
 package com.nexa.chat.feature.auth;
 
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.TextView;
@@ -29,17 +31,26 @@ import java.util.Locale;
 public final class AuthFragment extends Fragment {
     private static final String REGION_KEY = "auth_region";
 
+    private final ViewModelProvider.Factory viewModelFactory;
     private AuthViewModel viewModel;
+    private TextWatcher phoneWatcher;
     private String region;
 
     public AuthFragment() {
+        this(null);
+    }
+
+    AuthFragment(@Nullable ViewModelProvider.Factory viewModelFactory) {
         super(R.layout.fragment_auth);
+        this.viewModelFactory = viewModelFactory;
     }
 
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-        viewModel = new ViewModelProvider(this).get(AuthViewModel.class);
+        ViewModelProvider provider = viewModelFactory == null
+                ? new ViewModelProvider(this) : new ViewModelProvider(this, viewModelFactory);
+        viewModel = provider.get(AuthViewModel.class);
         region = savedInstanceState == null ? null : savedInstanceState.getString(REGION_KEY);
 
         ViewCompat.setOnApplyWindowInsetsListener(view, (root, windowInsets) -> {
@@ -63,6 +74,7 @@ public final class AuthFragment extends Fragment {
             phoneField.setError(null);
             otpField.setError(null);
 
+            String number = null;
             if (viewModel.screen() == AuthViewModel.Screen.OTP) {
                 if (!input(otp).matches("[0-9]+")) {
                     otpField.setError(getString(R.string.auth_error_otp));
@@ -71,7 +83,7 @@ public final class AuthFragment extends Fragment {
                 }
                 otp.setText(null);
             } else {
-                String number = input(phone);
+                number = input(phone);
                 if (number.isEmpty()) {
                     phoneField.setError(getString(R.string.auth_error_phone_required));
                     phone.requestFocus();
@@ -82,16 +94,15 @@ public final class AuthFragment extends Fragment {
                     country.requestFocus();
                     return;
                 }
-                if (PhoneNumberValidator.toE164(number, region) == null) {
-                    phoneField.setError(getString(R.string.auth_error_phone_invalid));
-                    phone.requestFocus();
-                    return;
-                }
             }
 
+            if (!viewModel.submit(number, region)) {
+                phoneField.setError(getString(R.string.auth_error_phone_invalid));
+                phone.requestFocus();
+                return;
+            }
             WindowCompat.getInsetsController(requireActivity().getWindow(), view)
                     .hide(WindowInsetsCompat.Type.ime());
-            viewModel.preview();
         });
 
         view.findViewById(R.id.auth_switch).setOnClickListener(v -> {
@@ -114,6 +125,36 @@ public final class AuthFragment extends Fragment {
         });
 
         viewModel.state().observe(getViewLifecycleOwner(), state -> render(view, state));
+    }
+
+    @Override
+    public void onViewStateRestored(@Nullable Bundle savedInstanceState) {
+        super.onViewStateRestored(savedInstanceState);
+        // Restored widget text is not a new edit and must not cancel a retained attempt.
+        TextInputEditText phone = requireView().findViewById(R.id.auth_phone);
+        phoneWatcher = new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+                viewModel.phoneChanged();
+            }
+
+            @Override
+            public void afterTextChanged(Editable text) {}
+        };
+        phone.addTextChangedListener(phoneWatcher);
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (phoneWatcher != null) {
+            TextInputEditText phone = requireView().findViewById(R.id.auth_phone);
+            phone.removeTextChangedListener(phoneWatcher);
+            phoneWatcher = null;
+        }
+        super.onDestroyView();
     }
 
     @Override
@@ -144,7 +185,11 @@ public final class AuthFragment extends Fragment {
             country.setText(labels.get(selected), false);
         }
         country.setOnItemClickListener((parent, selectedView, position, id) -> {
-            region = regions.get(position);
+            String selectedRegion = regions.get(position);
+            if (!selectedRegion.equals(region)) {
+                region = selectedRegion;
+                viewModel.phoneChanged();
+            }
             countryField.setError(null);
             phoneField.setError(null);
         });
@@ -161,6 +206,7 @@ public final class AuthFragment extends Fragment {
     private void render(View view, AuthViewModel.State state) {
         boolean signIn = state.screen == AuthViewModel.Screen.SIGN_IN;
         boolean otp = state.screen == AuthViewModel.Screen.OTP;
+        boolean challengeReady = state.challenge != null;
         TextView title = view.findViewById(R.id.auth_title);
         TextView description = view.findViewById(R.id.auth_description);
         TextView feedback = view.findViewById(R.id.auth_feedback);
@@ -168,19 +214,27 @@ public final class AuthFragment extends Fragment {
         MaterialButton switchScreen = view.findViewById(R.id.auth_switch);
 
         title.setText(otp ? R.string.auth_otp_title : signIn ? R.string.auth_sign_in : R.string.auth_register);
-        description.setText(otp ? R.string.auth_otp_description : R.string.auth_phone_description);
-        submit.setText(otp ? R.string.auth_verify_preview : R.string.auth_continue);
+        if (challengeReady) {
+            description.setText(R.string.auth_challenge_description);
+            submit.setText(R.string.auth_verify);
+        } else {
+            description.setText(otp ? R.string.auth_otp_description : R.string.auth_phone_description);
+            submit.setText(otp ? R.string.auth_verify_preview : R.string.auth_continue);
+        }
+        TextInputLayout otpField = view.findViewById(R.id.auth_otp_field);
+        otpField.setHint(getText(challengeReady ? R.string.auth_verification_code : R.string.auth_otp));
         switchScreen.setText(otp ? R.string.auth_change_number
                 : signIn ? R.string.auth_switch_register : R.string.auth_switch_sign_in);
 
         view.findViewById(R.id.auth_phone_form).setVisibility(otp ? View.GONE : View.VISIBLE);
         view.findViewById(R.id.auth_otp_field).setVisibility(otp ? View.VISIBLE : View.GONE);
         view.findViewById(R.id.auth_progress).setVisibility(state.loading ? View.VISIBLE : View.GONE);
-        view.findViewById(R.id.auth_country_field).setEnabled(!state.loading);
-        view.findViewById(R.id.auth_phone_field).setEnabled(!state.loading);
-        view.findViewById(R.id.auth_otp_field).setEnabled(!state.loading);
-        submit.setEnabled(!state.loading);
-        switchScreen.setEnabled(!state.loading);
+        boolean canChangeInput = !state.loading || viewModel.isRegistrationPending();
+        view.findViewById(R.id.auth_country_field).setEnabled(canChangeInput);
+        view.findViewById(R.id.auth_phone_field).setEnabled(canChangeInput);
+        otpField.setEnabled(!state.loading);
+        submit.setEnabled(!state.loading && !challengeReady);
+        switchScreen.setEnabled(canChangeInput);
 
         int message = 0;
         switch (state.feedback) {
@@ -195,6 +249,19 @@ public final class AuthFragment extends Fragment {
                 break;
             case NONE:
                 break;
+        }
+        if (state.failure != null) {
+            switch (state.failure) {
+                case UNAVAILABLE:
+                    message = R.string.auth_challenge_unavailable;
+                    break;
+                case RATE_LIMITED:
+                    message = R.string.auth_challenge_rate_limited;
+                    break;
+                case REJECTED:
+                    message = R.string.auth_challenge_rejected;
+                    break;
+            }
         }
         feedback.setVisibility(message == 0 ? View.GONE : View.VISIBLE);
         if (message != 0) {

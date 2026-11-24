@@ -23,4 +23,10 @@
     <string name="auth_sign_in_pending">Định dạng số điện thoại hợp lệ. Đăng nhập đang chờ cấu hình xác thực.</string>
     <string name="auth_otp_preview">Chưa gửi tin nhắn SMS.</string>
     <string name="auth_verification_pending">Bản xem trước chưa xác minh mã hoặc tạo tài khoản.</string>
+    <string name="auth_challenge_description">Yêu cầu xác minh đã sẵn sàng. Bản này chưa hỗ trợ xác minh mã.</string>
+    <string name="auth_verify">Xác minh</string>
+    <string name="auth_verification_code">Mã xác minh</string>
+    <string name="auth_challenge_unavailable">Dịch vụ chưa sẵn sàng. Kiểm tra kết nối rồi thử lại.</string>
+    <string name="auth_challenge_rate_limited">Bạn đã gửi quá nhiều yêu cầu. Hãy đợi trước khi thử lại.</string>
+    <string name="auth_challenge_rejected">Yêu cầu xác minh không được chấp nhận.</string>
 </resources>
