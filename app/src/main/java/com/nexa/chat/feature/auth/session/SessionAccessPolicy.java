@@ -1,9 +1,6 @@
 package com.nexa.chat.feature.auth.session;
 
-/**
- * Pure Java destination policy for the proposed CORE-01 shell.
- * This class neither validates credentials nor performs navigation.
- */
+/** Pure Java destination proposal for CORE-01. The session adapter supplies authoritative snapshots. */
 public final class SessionAccessPolicy {
     public enum Destination {
         CHECK_SESSION,
@@ -14,16 +11,13 @@ public final class SessionAccessPolicy {
 
     private SessionAccessPolicy() {}
 
-    /**
-     * Unknown or unverifiable state keeps protected destinations inaccessible.
-     * HOME requires an AUTHENTICATED state supplied by the authoritative session implementation.
-     */
-    public static Destination destinationFor(SessionRepository.State state) {
-        if (state == null) {
+    /** This policy selects a destination only; the future host must observe the latest snapshot. */
+    public static Destination destinationFor(SessionSnapshot snapshot) {
+        if (snapshot == null) {
             return Destination.CHECK_SESSION;
         }
 
-        switch (state) {
+        switch (snapshot.getState()) {
             case SIGNED_OUT:
                 return Destination.AUTH;
             case AUTHENTICATED:

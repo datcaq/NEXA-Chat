@@ -7,38 +7,43 @@ import static com.nexa.chat.feature.auth.session.SessionAccessPolicy.Destination
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
+import java.util.UUID;
 import org.junit.Test;
 
 public class SessionAccessPolicyTest {
+    // Value fixtures exercise invariants only; no session implementation or login is installed.
+    private final UUID userId = UUID.randomUUID();
+    private final UUID epoch = UUID.randomUUID();
+
     @Test
-    public void restoredButUnverifiedStateCannotOpenHome() {
+    public void unknownAndCheckingSnapshotsKeepHomeClosed() {
         assertEquals(CHECK_SESSION, SessionAccessPolicy.destinationFor(null));
-        assertEquals(CHECK_SESSION,
-                SessionAccessPolicy.destinationFor(SessionRepository.State.CHECKING));
+        assertEquals(CHECK_SESSION, SessionAccessPolicy.destinationFor(
+                new SessionSnapshot(SessionRepository.State.CHECKING, null, epoch)));
     }
 
     @Test
-    public void verificationFailureKeepsHomeClosedAndAllowsRetry() {
-        assertEquals(RETRY_SESSION,
-                SessionAccessPolicy.destinationFor(SessionRepository.State.UNAVAILABLE));
+    public void verificationUnavailableAllowsRetryWithoutOpeningHome() {
+        assertEquals(RETRY_SESSION, SessionAccessPolicy.destinationFor(
+                new SessionSnapshot(SessionRepository.State.UNAVAILABLE, null, epoch)));
     }
 
     @Test
-    public void onlyAnAuthenticatedStateSelectsHome() {
+    public void onlyAuthenticatedSnapshotSelectsHome() {
         for (SessionRepository.State state : SessionRepository.State.values()) {
+            UUID identity = state == SessionRepository.State.AUTHENTICATED ? userId : null;
+            SessionSnapshot snapshot = new SessionSnapshot(state, identity, epoch);
             if (state == SessionRepository.State.AUTHENTICATED) {
-                assertEquals(HOME, SessionAccessPolicy.destinationFor(state));
+                assertEquals(HOME, SessionAccessPolicy.destinationFor(snapshot));
             } else {
-                assertNotEquals(HOME, SessionAccessPolicy.destinationFor(state));
+                assertNotEquals(HOME, SessionAccessPolicy.destinationFor(snapshot));
             }
         }
     }
 
     @Test
-    public void logoutStateLeavesHomeAndSelectsAuth() {
-        assertEquals(HOME,
-                SessionAccessPolicy.destinationFor(SessionRepository.State.AUTHENTICATED));
-        assertEquals(AUTH,
-                SessionAccessPolicy.destinationFor(SessionRepository.State.SIGNED_OUT));
+    public void signedOutSnapshotSelectsAuth() {
+        assertEquals(AUTH, SessionAccessPolicy.destinationFor(
+                new SessionSnapshot(SessionRepository.State.SIGNED_OUT, null, UUID.randomUUID())));
     }
 }
