@@ -4,6 +4,8 @@
 
 [Architecture handoff and source evidence](README.md)
 
+[Security and Transport Contract Addendum V1](security-transport-addendum-v1.md#cross-contract-alignment-and-decision-gates) expands R03, R05–R09, R11–R21 and their review gates. The reported TV2 agreement records direction only. Status and IDs in this register are retained while the full revised Messaging Wire Contract V1 and its decision register remain unavailable in the reviewed GitHub evidence.
+
 The current implementation and source evidence are in the second column. Recommendations and alternatives are candidates. Owners are listed in TV1 / TV2 / TV3 order. **B** indicates a gate for the named implementation. **N** indicates work that can proceed in parallel. Unless explicitly marked internal, approvals are required from all three owners. TV1 can choose internal UX/storage/thread details that do not change shared behavior. Runtime storage and feature boundary semantics still require review by affected owners.
 
 | Decision | Current implementation and evidence | Recommendation and alternative | TV1 / TV2 / TV3 responsibilities | Dependency, risk and status |
