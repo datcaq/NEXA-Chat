@@ -14,6 +14,8 @@ This package records the recommendations and evidence from TV1 Architecture Revi
 
 [Security and Transport Contract Addendum V1](security-transport-addendum-v1.md) expands the WSS handshake, socket expiry, session revocation, refresh/replay, shared error policy and transport cancellation. TV2's reported directional agreement still needs the formal review of this revision and TV3 confirmation of Foundation stabilization.
 
+[Auth, User and Friend API Inventory](auth-user-friend-api-inventory.md) records the Day 1 implementation gaps and candidate wire contracts.
+
 ## Verified GitHub baseline
 
 Base `origin/main`: [`8b730dccc171c6d55fd8ae127448ed2b6c5f23a4`](https://github.com/datcaq/NEXA-Chat/commit/8b730dccc171c6d55fd8ae127448ed2b6c5f23a4). PRs #4, #5, #7, #8, #10, #11 and #12 are merged. The following records describe the handoff snapshot.
