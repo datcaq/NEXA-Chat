@@ -1,0 +1,4 @@
+<resources>
+ <item name="groups_name_input" type="id" />
+ <item name="groups_phone_input" type="id" />
+</resources>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+ android:id="@+id/groups_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical"
+ android:background="@color/groups_background">
+ <com.google.android.material.appbar.MaterialToolbar android:id="@+id/groups_toolbar"
+  android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+  android:background="@color/groups_primary" android:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar" />
+ <ProgressBar android:id="@+id/groups_progress" style="?android:attr/progressBarStyleHorizontal"
+  android:layout_width="match_parent" android:layout_height="4dp" android:indeterminate="true" />
+ <TextView android:id="@+id/groups_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+  android:padding="16dp" android:textColor="@color/groups_primary" android:accessibilityLiveRegion="polite" />
+ <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:fillViewport="true">
+  <LinearLayout android:id="@+id/groups_controls" android:layout_width="match_parent"
+   android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="16dp" />
+ </ScrollView>
+ <androidx.recyclerview.widget.RecyclerView android:id="@+id/groups_list"
+  android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+  android:clipToPadding="false" android:padding="12dp" />
+ <LinearLayout android:id="@+id/groups_pages" android:layout_width="match_parent"
+  android:layout_height="wrap_content" android:orientation="horizontal" android:paddingHorizontal="16dp" />
+</LinearLayout>
