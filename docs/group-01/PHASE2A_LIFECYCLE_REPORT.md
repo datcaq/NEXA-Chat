@@ -150,3 +150,163 @@ TV2: existing Groups ChatNavigator(Activity, conversationId) remains unchanged; 
 Git delivery: normal Conventional Commit `fix(groups): harden account lifecycle and request cancellation` on feature/group-01-create-group; normal non-force push to configured origin; final commit SHA/remote PR6 HEAD verified in final execution report. This file belongs to that implementation commit (resolve via git log -- docs/group-01/PHASE2A_LIFECYCLE_REPORT.md). PR6 remains Draft; no merge/rebase/force push. Initial pre-existing Phase1 untracked docs not included in implementation staging; checklist is included because explicitly updated by this task.
 
 Next milestone: independent review of TV3 hardening +actual device lifecycle suite, in parallel with TV1 recovery/provider and TV2 shared contract work. No automatic backend extraction or new shared interfaces authorized by this report.
+
+
+## 13. Phase 2A.1 — Independent lifecycle review and instrumentation
+
+**Date:** 25/11/2026, Asia/Saigon. **Latest phase verdict: VERIFIED**, within the requested Groups lifecycle, deterministic concurrency and fixture instrumentation scope. This does not change the historical Phase2A verdict above, approve PR6, freeze cross-team contracts, authorize Phase2B or establish GROUP-01 production readiness.
+
+### 13.1 Baseline, branch and review scope
+- Expected and actually reviewed baseline: `45c90a7e5be28332ace723ba9789af01a52fd9c7`.
+- Branch: `feature/group-01-create-group`; pre-edit fetch showed0 ahead/0 behind, PR6 open/Draft at that exact SHA. No concurrent changes to the target branch were found at preflight. A separate TV1 documentation branch was discovered and read, never merged.
+- Untracked Phase1 documents from earlier work were inspected and left untouched/outside this commit. Existing checklist, backend manifest and membership policy were read; their historical results were not rewritten.
+- This is a fresh source/fault-injection review by the implementation agent, not an official independent teammate approval. PR6 had no official reviews at review time. Exact delivery SHA, remote SHA and PR HEAD are verified after the normal commit/push in the final execution response.
+- Runtime/source reviewed: GroupsAccountScope, GroupsCleanup, GroupsDiagnostics, GroupsIntegration, GroupRequestHandle, GroupRequestRuntime, RemoteGroupRepository, GroupsActivity, GroupsViewModel and their JVM/instrumentation tests.
+
+### 13.2 Architecture and ownership alignment
+Preserve one backend, shared Conversation UUID/Message pipeline, least privilege and explicit period/history boundaries. User UUID, server JWT sid and local sessionEpoch remain distinct; Groups uses only the supplied user UUID/local epoch and does not parse sid, refresh JWT or fabricate a new epoch on credential refresh.
+
+TV1 remains owner of Auth/Session/CredentialProvider/principal/security/shared HTTP/composition root/Home/cross-module navigation. TV2 remains owner of Messaging runtime/router/presentation/wire/sequence/replay/receipts/history. No source or shared interface owned by either was changed; no duplicate GROUP transport was added.
+
+**D08 is not established/frozen by this review packet.** Earlier Phase2A wording above is retained as history. The migration constraint in this run comes directly from the Phase2A.1 instruction: no backend/schema/Flyway edits. Do not infer a complete D08 ADR or approval. V1 Git blob remains `03e3057ee5c6bbaaf0696ed271767991c205eb8c`.
+
+### 13.3 Findings — confirmed versus unconfirmed
+Severity below is engineering priority, not a security exploit/CVSS assessment.
+
+| ID / priority | Exact source and baseline behavior | Confirmation and resolution |
+|---|---|---|
+| G21-R01 P1 | app/src/main/java/com/nexa/chat/feature/groups/data/GroupRequestHandle.java, submitRegistered baseline335–359: only state==ADMITTED was treated as never started | Deterministic dispatch-rejection-after-cancel left CANCELLATION_REQUESTED/inFlight1 with no enqueued call. Fixed with task kind and an execution/rejection ticket; proven rejected DISPATCH terminates even after cancel/timeout changed request state. Exactly-once account/global recovery tested. |
+| G21-R02 P2 | Same method: generic rejection suppressed any PENDING delivery, including rejection of CANCEL or DISPATCH after a timeout result was selected | Two baseline regressions lost REQUEST_TIMEOUT. CANCEL rejection now preserves the selected result and unknown physical work; DISPATCH rejection preserves already selected timeout. RESULT rejection is explicitly suppressed with retained Outcome and category diagnostic, never inline callback fallback. |
+| G21-R03 P1 | app/src/main/java/com/nexa/chat/feature/groups/GroupsCleanup.java work/reserve; GroupsAccountScope.listen: terminal UI handoff used the physical cleanup queue | Baseline latch test occupied both physical workers; unrelated closed notification could not run. Fixed separate bounded physical and terminal-UI lanes; same test now passes while physical cleanup remains blocked. No arbitrary work under scope lock or UI join. |
+| G21-R04 P2 | GroupRequestHandle.requestCancel baseline270: early return when cancellation was already requested by watchdog | Source-confirmed explicit cancel could not withdraw a queued timeout notification. Explicit cancel now suppresses any not-yet-claimed result independently of whether physical cancellation was already requested; timeout outcome remains observable. New deterministic test verifies suppression and continued physical accounting. No separate baseline failed-run claim for this new case. |
+| G21-R05 P2 | app/src/main/java/com/nexa/chat/feature/groups/ui/GroupsActivity.java onCreate/onAccessChanged; viewmodel/GroupsViewModel.java load | Opening while SUSPENDED refused the first load, but recovery only rendered an empty view. Added ensureInitialLoad after authorized same-epoch recovery; VM guard prevents refresh reload storms or draft/retry loss. Verified with new JVM and actual UI cases. |
+| G21-T01 P2 test defects | app/src/androidTest/java/com/nexa/chat/feature/groups/GroupsFlowTest.java refresh/logout/late response cases | Actual stable-device run exposed an ambiguous dialog-title matcher (same text as a background button) and two premature DESTROYED assertions after UI handoff. Added positive-control dialog ID+text matcher and bounded ON_DESTROY observation. Kept dialog disappearance, hidden private input and exact DESTROYED assertions; no sleep/reduced expectation/skipped case. Final full suite passes. |
+| G21-H01 hardening | GroupsIntegration.Dependencies and RemoteGroupRepository.bindScope both registered close for the same repository | Redundant adoption confirmed; Remote.close was already idempotent, so no duplicate harmful side effect was established. Added identity-keyed resource adoption, capped at8 distinct objects, including late registration after closure; repeated same object consumes one reservation/close. |
+
+Baseline fault evidence, before runtime fixes: rejection suite6 cases,3 failed; blocked-cleanup UI test1 case,1 failed. Logs/XML preserved outside Git:
+- `D:/Nexa-Chat/test-artifacts/phase2a1-baseline-rejection.log` and `phase2a1-baseline-rejection-xml/`.
+- `D:/Nexa-Chat/test-artifacts/phase2a1-baseline-cleanup.log` and `phase2a1-baseline-cleanup-xml/`.
+
+No reproduced cross-account data exposure, fabricated server rollback, shared-client shutdown or newly confirmed backend defect. Actual production transport admission/JWT/directory/WS/history integration remains unverified, not implicitly approved because the fixture suite passes.
+
+### 13.4 Request state machine and executor policy
+Transport states remain ADMITTED→DISPATCHED→STARTED, optional CANCELLATION_REQUESTED, TERMINATED, SETTLED. STARTED is enqueue admission, not invented socket-start telemetry. TERMINATED requires Retrofit terminal callback or proof the call was never enqueued. SETTLED additionally requires all owned invocations/results to return or be suppressed. Unknown physical work stays charged through timeout/shutdown deadline.
+
+Every owned submitted task now has:
+- **Kind:** DISPATCH, CANCEL or RESULT.
+- **Ticket phase:** WAITING→RUNNING→RETURNED, or WAITING→REJECTED, selected with CAS. A rejected ticket cannot execute late even if an unusual executor queued before throwing. An inline execution followed by executor exception cannot decrement accounting a second time.
+- **Selected outcome:** NONE/RESPONSE/START_FAILED/DISPATCH_REJECTED/TIMEOUT. RESPONSE represents a transport terminal result, including network failure; this is feature diagnostics, not a new wire DTO.
+
+| Failure category | Policy |
+|---|---|
+| DISPATCH rejected before execution | Ticket proves never enqueued regardless current request state; transition TERMINATED, preserve selected timeout/explicit suppression; otherwise select REQUEST_DISPATCH_REJECTED through a bounded RESULT task. |
+| CANCEL task rejected after start | Record CANCEL_EXECUTOR_REJECTED; do not fabricate termination or discard selected timeout; retain capacity until terminal/settlement. |
+| RESULT task rejected | Suppress exactly once; retain selected Outcome and RESULT_EXECUTOR_REJECTED diagnostic; timeout also records TIMEOUT_RESULT_EXECUTOR_REJECTED. No inline external callback fallback. |
+| Executor throws after a task claimed execution | Record kind-specific EXECUTOR_FAILURE_AFTER_START; wrapper alone owns return accounting. |
+| Queue-then-throw before execution | Rejection wins the ticket; a later wrapper invocation is a no-op, never a second factory/transport call. |
+| Explicit caller cancel after timeout selection | Withdraw only unclaimed delivery; keep timeout outcome/unknown transport ownership; already-claimed callback may finish. |
+
+Callbacks are initialized before global publication of the request, avoiding a watchdog publication gap. Account invalidation still rechecks latest scope/result ownership. This does not implement TV1's shared credential/actual-I/O admission gate.
+
+### 13.5 Concurrency regression matrix
+
+| Scenario | Deterministic evidence | Result |
+|---|---|---|
+| ADMITTED dispatch reject | GroupRequestRejectionTest.admittedDispatchRejectionSettlesAndRecoversAccountCapacity | PASS |
+| Dispatch reject vs explicit cancel | dispatchRejectionAfterExplicitCancelDoesNotLeak; cancellation occurs while execute is gated by latches | PASS |
+| Dispatch reject vs timeout | dispatchRejectionPreservesAlreadySelectedTimeout; fake clock and controlled executor | PASS |
+| Cancel reject with timeout selected | rejectedCancelDoesNotDiscardTimeoutOrFabricateTermination | PASS |
+| Explicit cancel reject after start | explicitCancellationTaskRejectionRetainsUnknownTransport | PASS |
+| Result reject after terminal | rejectedResultAfterTerminalSuppressesWithoutDuplicateDelivery | PASS |
+| Timeout result itself rejected | rejectedTimeoutResultRemainsObservableWithoutInlineFallback | PASS |
+| Inline execution then throw | executorRunsInlineThenThrowsCannotDoubleReleaseOrFabricateTermination, inlineResultThenExecutorThrowDoesNotDeliverTwice, inlineCancelThenExecutorThrowStillNeedsTransportTerminal | PASS |
+| Queued rejected wrapper runs late | queuedThenRejectedDispatchCannotExecuteLateFactory | PASS |
+| Per-account/global leak and recovery | allSubmissionsRejectedNeverLeaksAccountCapacity; cancelledRejectedDispatchesReleaseGlobalCapacityExactlyOnce, then all64 global slots admitted and overflow rejected | PASS |
+| Explicit cancel withdraws queued timeout | explicitCancelWithdrawsQueuedTimeoutButRetainsUnknownPhysicalWork | PASS |
+| Timeout/terminal race; duplicate callbacks; late success | Existing GroupRequestLifecycleTest cases preserved | PASS |
+| Blocked physical cleanup vs terminal UI | GroupsLifecycleHardeningTest.closedNotificationDoesNotWaitBehindBlockedPhysicalCleanup | PASS |
+| Identity adoption/late ownership | resourceIdentityIsAdoptedOnceBeforeAndAfterClosure; newResourceAfterClosureIsDisposedAndDeduplicated | PASS |
+| Both cleanup lane capacities/recovery | GroupsCleanupCapacityTest reserves128, rejects129th, settles once and recovers on each lane; cancelled unsubmitted job never runs | PASS |
+| Initial CHECKING recovery | GroupsViewModelTest.firstLoadWaitsForSameEpochRecoveryAndIsNotRepeatedByRefresh +actual UI equivalent | PASS |
+
+JVM concurrency tests use fake clocks, controlled executors/latches and finite event waits; no new arbitrary sleeps prove concurrency. Loops/reruns are not independent extra test cases.
+
+### 13.6 Account/session/capacity results
+- Same-epoch ACTIVE↔SUSPENDED preserves valid draft/retry and defers delivery. Initial opening while SUSPENDED admits zero protected list calls; first ACTIVE loads once, further refresh does not reinitialize it.
+- Closed/EXPIRED never reactivates; old UUID/epoch callbacks remain fenced. JVM replacement uses distinct UUIDs; UI new-epoch fixture covers same-user new epoch. These are not real authenticated A/B E2E.
+- Account A is invalidated before B publishes; stale preparing candidate cannot publish after logout. Activity recreation/unmount does not close the account-owned repository or independently log out the session.
+- Requests:16 per repository,64 global live/retiring,2 request workers, bounded256 work queue, one periodic watchdog. Retired/unknown calls continue to consume capacity; cancel/deadline never manufactures termination.
+- Scope:32 normal/deferred callbacks;8 distinct owned resources;16 listeners per kind, bounded late closure registrations.
+- **Updated cleanup bound:**2 physical workers +1 independent terminal-UI handoff worker; each lane has128 reserved/queued/running slots,256 combined. This explicitly replaces the historical Phase2A shared128-job lane for this revision. Total dedicated production Groups background workers=6 (2 request+1 watchdog+2 physical cleanup+1 terminal handoff), excluding shared Android UI/HTTP threads.
+- Keyed adoption prevents duplicate repo close registrations from consuming resources twice. Late new resource adoption schedules disposal; same object is closed once.
+- Host UI executor must hand off promptly onto Android main thread. An inline blocking observer can block its own lane/thread; no claim arbitrary user code can be forcibly stopped. No shared OkHttp dispatcher or Messaging executor is shut down.
+
+### 13.7 Android device and actual execution
+**Online device:** emulator-5580; model sdk_gphone64_x86_64; API37; Android17; configured AVD Group01_Scope_API37. Final run used1536MiB RAM,2 cores, software GPU, Vulkan disabled,1080×2400,density420,gesture navigation2. Device /data:6,082,144KiB total,4,089,736KiB available after testing. Variant debug; runner `com.nexa.chat.test/androidx.test.runner.AndroidJUnitRunner`, target `com.nexa.chat`.
+
+Only existing configured AVD was used. All launches read-only/no-snapshot/no-window/no-audio; no wipe, AVD deletion or global SDK configuration change. Guest animation scales set0 in the disposable overlay. The task-owned emulator was shut down after evidence capture; original AVD user data preserved.
+
+Execution history is deliberately retained:
+1. Initial1536MiB startup under severe host memory pressure failed allocating guest RAM. Retry1024MiB reached device/boot_completed1.
+2. First full run **FAIL:11 tests,1 passed,10 failed,0 errors/skips**, exit1,9m57s. Every failure was RootViewWithoutFocusException; captured window focus identified launcher/SystemUI ANR dialogs covering Groups. XML/logs/screenshot preserved in `phase2a1-instrumentation-first/` and `phase2a1-screen.png`. Not presented as PASS.
+3. Stopped the now-idle build daemon/task-owned emulator, used bounded per-command Gradle heap/worker options and restarted the existing AVD read-only at1536MiB after resources recovered. No unrelated host user applications were closed; guest launcher ANR was cleared in the disposable overlay. No test expectations were relaxed. Temporary attempt to stop unused Docker test service did not provide reliable immediate memory recovery; Docker API was later confirmed available29.4.3 and backend verify executed successfully.
+4. Second full run on stable device **FAIL:13 tests,10 passed,3 failed,0 errors/skips**, exit1,2m46s. These were G21-T01 dialog matcher/destruction observation issues, not ANR failures. Preserved `phase2a1-instrumentation-second/results.xml`, command.log and raw logs.
+5. After correcting those test observations, final full run **PASS:13/13,0 failures/errors/skips**, exit0,1m46s: **10 GroupsFlowTest +2 HomeFragmentTest +1 ExampleInstrumentedTest**. No class/method filter or skipped tests. Final XML and raw logs copied to `phase2a1-instrumentation-passed/`.
+
+The13 are unique cases in the final suite, not the sum of all executions. Existing8 Groups cases retained;2 added (initial suspension recovery and unmount/recreation ownership). Dialog absence now has a positive control and specific alertTitle+text matcher. Logout/late-response tests still require DESTROYED, but observe ON_DESTROY before checking state rather than equating UI idle with lifecycle completion.
+
+Fixture limitation: GroupsFlowTest uses test-only GroupsRepository/PeopleDirectory. PASS proves UI/account-lifecycle behavior under those fixtures. It does **not** prove real TV1 Auth/credential refresh/directory, production Retrofit cancellation/physical termination, TV2 WS or production GROUP messaging. API26–36/alternate hardware/nav configurations remain unverified.
+
+### 13.8 Reproducible commands, exits and reports
+PowerShell environment: JAVA_HOME=`C:/Program Files/Java/jdk-21`; ANDROID_HOME=`C:/Users/Phuc/AppData/Local/Android/Sdk`; ANDROID_SERIAL=`emulator-5580`. Gradle9.6.0/project toolchain25, Java11 Android compatibility, SDK37.0; Maven3.9.11/Java21; Docker29.4.3/PostgreSQL16-alpine.
+
+Final commands (heap/worker overrides apply only to those invocations, no project/global config edited):
+```powershell
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest --rerun-tasks --no-build-cache --no-daemon --max-workers=2 "-Dorg.gradle.jvmargs=-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8"
+.\gradlew.bat :app:connectedDebugAndroidTest --no-build-cache --no-daemon --max-workers=2 "-Dorg.gradle.jvmargs=-Xmx512m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8"
+# From backend/, after task emulator shutdown:
+mvn -B verify
+```
+
+| Check | Exit/status | Counts | Evidence location |
+|---|---|---|---|
+| Final Android build/JVM/instrumentation APK |0/PASS |93 JVM,93 passed,0 failures/errors/skips;11 XML; test APK compile PASS | app/build/test-results/testDebugUnitTest/; external phase2a1-android-final.log |
+| Final connected instrumentation |0/PASS |13 passed,0 failures/errors/skips; Groups10/Home2/Example1 | app/build/outputs/androidTest-results/connected/debug/TEST-Group01_Scope_API37(AVD) - 17.xml; app/build/reports/androidTests/connected/debug/index.html; external phase2a1-instrumentation-final.log and phase2a1-instrumentation-passed/ |
+| Backend regression |0/PASS |25 passed,0 failures/errors/skips =12 service +13 actual PostgreSQL tests | backend/target/surefire-reports/; external phase2a1-backend.log; complete13:27:37+07 |
+| Flyway test DB validate/migrate |PASS within Maven |1 validated/applied V1; not a shared/prod DB check | Same Maven log |
+| Baseline fault reproductions |1/FAIL expected |3/6 rejection regressions failed;1/1 starvation regression failed before fixes | Preserved baseline logs/XML above |
+| Device inventory |0/PASS |serial/model/API/version/storage collected; boot_completed1 | adb devices -l /shell getprop /df /wm commands observed |
+| Ownership, whitespace and staging checks |PASS before delivery |Only confirmed Groups source/tests and this report; no secrets/generated artifacts | Complete diff/path/secret-pattern review and git diff --check |
+
+External artifact prefix: `D:/Nexa-Chat/test-artifacts/`. No APK/XML/log/AVD artifacts committed. JVM93 =86 Groups +7 branch baseline;20 new JVM cases compared with Phase2A73, not repeated-run inflation.
+
+Tested APK SHA256:
+- app-debug.apk: `69E9BB0728D900FB740C789843A4F43DF9F707DD647FDAB68A1C6B8493D24339`.
+- app-debug-androidTest.apk: `5359DB5DFD926209397A0500E5025EDEA182A52D0275C5D58E99294A44F0AE43`.
+
+### 13.9 Files and delivery scope
+Modified Groups production: GroupsAccountScope.java, GroupsCleanup.java, GroupsIntegration.java, data/GroupRequestHandle.java, data/RemoteGroupRepository.java, ui/GroupsActivity.java, viewmodel/GroupsViewModel.java.
+Modified tests: GroupsLifecycleHardeningTest.java, GroupsViewModelTest.java, androidTest/GroupsFlowTest.java.
+Added tests: GroupsCleanupCapacityTest.java, data/GroupRequestRejectionTest.java.
+Documentation: append this section only. GroupRequestRuntime/GroupsDiagnostics reviewed but unchanged. No shared GroupRepository/PeopleDirectory/GroupApi/model signatures changed; no MainActivity/Home/Auth/Session/Message/backend/migration/build-config edits.
+
+Normal commit/push targets feature/group-01-create-group; suggested message `fix(groups): harden lifecycle rejection and verify Android instrumentation`. Local/remote/PR6 HEAD must match; PR6 stays Draft/unmerged. No reset/clean/rebase/merge-main/force-push. Exact final commit is reported after delivery; resolve this section's implementation commit via git log -- docs/group-01/PHASE2A_LIFECYCLE_REPORT.md.
+
+### 13.10 Cross-team dependencies and production-readiness limits
+**TV1**
+- PR13 remains `1c459c517cbfea06d1c071554a05c894157e157e`, official CHANGES_REQUESTED for [TV2-R13-01](https://github.com/datcaq/NEXA-Chat/pull/13#pullrequestreview-6050049996) at review time.
+- FIX1 is a **proposed design, not implementation/approval**, in [coordinator-fix1-design.md at7d75bf8](https://github.com/datcaq/NEXA-Chat/blob/7d75bf8b919899f6487e6b8ed0b8e27a34772c11/docs/architecture/tv1/coordinator-fix1-design.md). Actual recovery/partial allocation/optional module policy remains pending.
+- Final fetch discovered TV1 documentation-only commit `acf30030a549c3bf0cbb501a68e376430710beeb`. Its [Security/Transport Addendum V1](https://github.com/datcaq/NEXA-Chat/blob/acf30030a549c3bf0cbb501a68e376430710beeb/docs/architecture/tv1/security-transport-addendum-v1.md) is PROPOSED/PENDING APPROVAL and still states FIX1 design-only. It separates epoch/credential admission, cancellation/termination and candidate timeout values; no shared production gate or finalized wire contract was delivered. This review does not approve those proposals or automatically adopt their signatures/values.
+- Session epoch/invalidations, real CredentialProvider/trusted principal/PeopleDirectory, composition root/Home and shared HTTP operation admission remain TV1-owned. Groups checks its latest supplied scope and suppresses stale result mutation; a snapshot read alone is not proof of atomic protected network dispatch under TV1 authority.
+
+**TV2**
+- PR9 at `ea239b9f66a153ac9f848fd089e5d4dd8b8874e4` remains Draft, no official approval record; full production Wire Contract is not frozen.
+- ChatNavigator host bridge, shared Conversation UUID/Message pipeline, history vsreplay, membership-period READ/DELIVERED and GROUP authorization/event integration remain pending reviewed contracts. No implementation duplicated here.
+
+**TV3**
+- Continue Groups request/account gates/cleanup/isolation/tests within approved contracts. No membershipPeriodId/rejoin/history/cursor/event schema or retention/ADMIN/disband policy implemented or frozen.
+- Unknown transport remains bounded, not forcibly terminated. Cleanup ownership rejection before adoption is still factory responsibility. Prompt UI handoff/host invalidation must be validated when real adapters arrive.
+- Actual instrumented UI/rotation/suspension/logout/unmount now verified on one API37 AVD with fixtures. No real multi-account Auth/HTTP/WS E2E, shared DB migration state, media revocation, backend extraction or Phase2B authorization established.
+- Independent teammate review/merge authority remains Hoàng Phúc and the team, not this agent's test verdict.
+
+**Production assessment:** Phase2A.1 lifecycle/concurrency/instrumentation acceptance is VERIFIED. GROUP-01 production readiness is **not established**; the above integration work is outside this phase and remains explicitly pending.

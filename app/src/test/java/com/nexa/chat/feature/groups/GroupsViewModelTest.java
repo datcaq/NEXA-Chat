@@ -68,6 +68,43 @@ public class GroupsViewModelTest {
   }
 
   @Test
+  public void firstLoadWaitsForSameEpochRecoveryAndIsNotRepeatedByRefresh() throws Exception {
+    var access =
+        new java.util.concurrent.atomic.AtomicReference<>(GroupsAccountScope.Access.SUSPENDED);
+    GroupsAccountScope checking =
+        new GroupsAccountScope(userId, UUID.randomUUID(), access::get, Runnable::run);
+    java.util.concurrent.atomic.AtomicInteger loads =
+        new java.util.concurrent.atomic.AtomicInteger();
+    TestGroups remote =
+        new TestGroups() {
+          @Override
+          public void groups(int page, Result<Page<Summary>> callback) {
+            loads.incrementAndGet();
+            super.groups(page, callback);
+          }
+        };
+    GroupsViewModel target =
+        new GroupsViewModel(new SavedStateHandle(), remote, directory, checking);
+    target.ensureInitialLoad();
+    assertEquals(0, loads.get());
+    UUID epoch = checking.epoch();
+    access.set(GroupsAccountScope.Access.ACTIVE);
+    target.ensureInitialLoad();
+    target.ensureInitialLoad();
+    assertEquals(1, loads.get());
+    assertEquals(epoch, checking.epoch());
+    target.name("retained draft");
+    access.set(GroupsAccountScope.Access.SUSPENDED);
+    target.ensureInitialLoad();
+    access.set(GroupsAccountScope.Access.ACTIVE);
+    target.ensureInitialLoad();
+    assertEquals(1, loads.get());
+    assertEquals("retained draft", target.name());
+    checking.close();
+    assertTrue(checking.awaitCleanup(5, java.util.concurrent.TimeUnit.SECONDS));
+  }
+
+  @Test
   public void blankNameDoesNotCallServer() throws Exception {
     vm.name("  ");
     vm.create();

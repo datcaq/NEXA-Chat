@@ -24,6 +24,7 @@ public final class GroupsViewModel extends ViewModel {
   private int generation;
   private boolean createFailed;
   private boolean disposed;
+  private boolean initialLoadStarted;
 
   public GroupsViewModel(
       SavedStateHandle saved,
@@ -145,6 +146,7 @@ public final class GroupsViewModel extends ViewModel {
 
   public void load(int requestedPage) {
     if (!ensureScope() || busy || requestedPage < 0) return;
+    initialLoadStarted = true;
     busy = true;
     error = "";
     createFailed = false;
@@ -223,6 +225,11 @@ public final class GroupsViewModel extends ViewModel {
     } catch (java.util.concurrent.RejectedExecutionException rejected) {
       admissionRejected();
     }
+  }
+
+  /** Opening while CHECKING must defer, not permanently lose, the first authorized load. */
+  public void ensureInitialLoad() {
+    if (!initialLoadStarted) load(0);
   }
 
   public void create() {

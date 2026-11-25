@@ -3,7 +3,7 @@ package com.nexa.chat.feature.groups.data;
 import com.nexa.chat.feature.groups.repository.GroupRepository;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import retrofit2.*;
 
@@ -29,6 +29,27 @@ public final class GroupRequestHandle {
     SUPPRESSED
   }
 
+  private enum TaskKind {
+    DISPATCH,
+    CANCEL,
+    RESULT
+  }
+
+  private enum TaskPhase {
+    WAITING,
+    RUNNING,
+    RETURNED,
+    REJECTED
+  }
+
+  public enum Outcome {
+    NONE,
+    RESPONSE,
+    START_FAILED,
+    DISPATCH_REJECTED,
+    TIMEOUT
+  }
+
   public final UUID requestId = UUID.randomUUID();
   public final UUID userId, sessionEpoch;
   private final RemoteGroupRepository owner;
@@ -43,6 +64,8 @@ public final class GroupRequestHandle {
   private final long admittedAt;
   private final long timeoutNanos, shutdownNanos;
   private Runnable timeoutResult;
+  private Runnable dispatchRejectedResult;
+  private Outcome outcome = Outcome.NONE;
 
   GroupRequestHandle(
       RemoteGroupRepository owner,
@@ -50,7 +73,8 @@ public final class GroupRequestHandle {
       UUID epoch,
       GroupRequestRuntime runtime,
       long timeoutNanos,
-      long shutdownNanos) {
+      long shutdownNanos,
+      GroupRepository.Result<?> callback) {
     this.owner = owner;
     this.userId = user;
     this.sessionEpoch = epoch;
@@ -58,6 +82,8 @@ public final class GroupRequestHandle {
     this.timeoutNanos = timeoutNanos;
     this.shutdownNanos = shutdownNanos;
     admittedAt = runtime.clock.getAsLong();
+    timeoutResult = () -> callback.failure("REQUEST_TIMEOUT");
+    dispatchRejectedResult = () -> callback.failure("REQUEST_DISPATCH_REJECTED");
   }
 
   public synchronized State state() {
@@ -66,6 +92,10 @@ public final class GroupRequestHandle {
 
   public synchronized Delivery delivery() {
     return delivery;
+  }
+
+  public synchronized Outcome outcome() {
+    return outcome;
   }
 
   public synchronized Set<State> visitedStates() {
@@ -82,10 +112,7 @@ public final class GroupRequestHandle {
   }
 
   <T> void start(Supplier<Call<T>> factory, GroupRepository.Result<T> callback) {
-    synchronized (this) {
-      timeoutResult = () -> callback.failure("REQUEST_TIMEOUT");
-    }
-    task(() -> dispatch(factory, callback));
+    task(TaskKind.DISPATCH, () -> dispatch(factory, callback));
   }
 
   private <T> void dispatch(Supplier<Call<T>> factory, GroupRepository.Result<T> callback) {
@@ -112,7 +139,7 @@ public final class GroupRequestHandle {
         terminal = true;
         transition(State.TERMINATED);
       }
-      result(() -> callback.failure("REQUEST_START_FAILED"), false);
+      result(() -> callback.failure("REQUEST_START_FAILED"), false, Outcome.START_FAILED);
       return;
     }
     synchronized (this) {
@@ -175,10 +202,12 @@ public final class GroupRequestHandle {
           terminal = true;
           transition(State.TERMINATED);
         }
-        failure = prepareResult(() -> callback.failure("REQUEST_START_FAILED"), true);
+        failure =
+            prepareResult(
+                () -> callback.failure("REQUEST_START_FAILED"), true, Outcome.START_FAILED);
       }
       scheduleCancel();
-      if (failure != null) submitRegistered(failure);
+      if (failure != null) submitRegistered(TaskKind.RESULT, failure);
     }
   }
 
@@ -198,10 +227,10 @@ public final class GroupRequestHandle {
       tasks++; // keep the terminal callback invocation charged through its final accounting
       terminal = true;
       transition(State.TERMINATED);
-      resultWork = prepareResult(callback, false);
+      resultWork = prepareResult(callback, false, Outcome.RESPONSE);
     }
     try {
-      if (resultWork != null) submitRegistered(resultWork);
+      if (resultWork != null) submitRegistered(TaskKind.RESULT, resultWork);
     } finally {
       synchronized (this) {
         tasks--;
@@ -210,22 +239,23 @@ public final class GroupRequestHandle {
     }
   }
 
-  private void result(Runnable callback, boolean cancellationFailure) {
+  private void result(Runnable callback, boolean cancellationFailure, Outcome selected) {
     Runnable resultWork;
     synchronized (this) {
-      resultWork = prepareResult(callback, cancellationFailure);
+      resultWork = prepareResult(callback, cancellationFailure, selected);
     }
-    if (resultWork != null) submitRegistered(resultWork);
+    if (resultWork != null) submitRegistered(TaskKind.RESULT, resultWork);
   }
 
   /** Select one result AND charge its task atomically with timeout/transport terminal state. */
-  private Runnable prepareResult(Runnable callback, boolean cancellationFailure) {
+  private Runnable prepareResult(Runnable callback, boolean cancellationFailure, Outcome selected) {
     if (resultScheduled || delivery != Delivery.PENDING) return null;
     if (cancelled && !cancellationFailure) {
       delivery = Delivery.SUPPRESSED;
       return null;
     }
     resultScheduled = true;
+    outcome = selected;
     tasks++;
     return () -> {
       try {
@@ -267,11 +297,15 @@ public final class GroupRequestHandle {
   private void requestCancel() {
     long now = runtime.clock.getAsLong();
     synchronized (this) {
-      if (released || cancelled) return;
-      cancelled = true;
-      cancelAt = now;
-      if (!terminal) transition(State.CANCELLATION_REQUESTED);
+      if (released) return;
+      // Explicit caller cancellation can withdraw a queued timeout result too. It is distinct
+      // from the watchdog's physical cancellation request, which must preserve that result.
       if (delivery == Delivery.PENDING) delivery = Delivery.SUPPRESSED;
+      if (!cancelled) {
+        cancelled = true;
+        cancelAt = now;
+        if (!terminal) transition(State.CANCELLATION_REQUESTED);
+      }
     }
     scheduleCancel();
     releaseIfDone();
@@ -286,6 +320,7 @@ public final class GroupRequestHandle {
       tasks++;
     }
     submitRegistered(
+        TaskKind.CANCEL,
         () -> {
           try {
             captured.cancel();
@@ -305,13 +340,13 @@ public final class GroupRequestHandle {
         cancelled = true;
         cancelAt = now;
         transition(State.CANCELLATION_REQUESTED);
-        if (timeoutResult != null) failure = prepareResult(timeoutResult, true);
+        failure = prepareResult(timeoutResult, true, Outcome.TIMEOUT);
       }
     }
     if (timeout) {
       owner.diagnostics().record("REQUEST_TIMEOUT", null);
       scheduleCancel();
-      if (failure != null) submitRegistered(failure);
+      if (failure != null) submitRegistered(TaskKind.RESULT, failure);
     }
     synchronized (this) {
       if (!released
@@ -325,39 +360,63 @@ public final class GroupRequestHandle {
     }
   }
 
-  private void task(Runnable work) {
+  private void task(TaskKind kind, Runnable work) {
     synchronized (this) {
       tasks++;
     }
-    submitRegistered(work);
+    submitRegistered(kind, work);
   }
 
-  private void submitRegistered(Runnable work) {
-    AtomicBoolean began = new AtomicBoolean();
+  private void submitRegistered(TaskKind kind, Runnable work) {
+    AtomicReference<TaskPhase> phase = new AtomicReference<>(TaskPhase.WAITING);
     try {
       runtime.executor.execute(
           () -> {
-            began.set(true);
+            // Rejection and execution claim the SAME ticket. A queue-then-throw executor cannot
+            // run a rejected dispatch later and accidentally start stale transport.
+            if (!phase.compareAndSet(TaskPhase.WAITING, TaskPhase.RUNNING)) return;
             try {
               work.run();
             } finally {
               synchronized (this) {
                 tasks--;
               }
+              phase.set(TaskPhase.RETURNED);
               releaseIfDone();
             }
           });
     } catch (RuntimeException e) {
-      owner.diagnostics().record("REQUEST_WORK_REJECTED", e);
-      if (began.get()) return; // inline executor already ran the task's finally/accounting
+      if (!phase.compareAndSet(TaskPhase.WAITING, TaskPhase.REJECTED)) {
+        owner.diagnostics().record(kind + "_EXECUTOR_FAILURE_AFTER_START", e);
+        return; // only the wrapper that claimed execution owns return accounting
+      }
+      owner.diagnostics().record(kind + "_EXECUTOR_REJECTED", e);
+      Runnable rejectionResult = null;
       synchronized (this) {
         tasks--;
-        if (state == State.ADMITTED) {
-          cancelled = true;
-          markNeverStarted();
+        switch (kind) {
+          case DISPATCH:
+            // Ticket proves non-execution even if cancel/timeout already changed request state.
+            terminal = true;
+            transition(State.TERMINATED);
+            if (!resultScheduled && delivery == Delivery.PENDING) {
+              if (cancelled) delivery = Delivery.SUPPRESSED;
+              else
+                rejectionResult =
+                    prepareResult(dispatchRejectedResult, false, Outcome.DISPATCH_REJECTED);
+            }
+            break;
+          case CANCEL:
+            // Keep selected timeout delivery and unknown physical transport charged.
+            break;
+          case RESULT:
+            if (delivery == Delivery.PENDING) delivery = Delivery.SUPPRESSED;
+            if (outcome == Outcome.TIMEOUT)
+              owner.diagnostics().record("TIMEOUT_RESULT_EXECUTOR_REJECTED", e);
+            break;
         }
-        if (delivery == Delivery.PENDING) delivery = Delivery.SUPPRESSED;
       }
+      if (rejectionResult != null) submitRegistered(TaskKind.RESULT, rejectionResult);
       // Retain started/unknown work until actual terminal evidence. No inline external fallback.
       releaseIfDone();
     }
@@ -372,6 +431,7 @@ public final class GroupRequestHandle {
       released = true;
       call = null;
       timeoutResult = null;
+      dispatchRejectedResult = null;
       transition(State.SETTLED);
     }
     owner.settled(this);

@@ -67,7 +67,7 @@ public final class RemoteGroupRepository implements GroupRepository {
     if (closed || !requests.isEmpty() || (scope != null && scope != value))
       throw new IllegalStateException("Repository cannot cross account scopes or bind after use");
     scope = value;
-    scope.own(this::close);
+    scope.own(this, this::close);
   }
 
   public GroupsDiagnostics diagnostics() {
@@ -130,7 +130,8 @@ public final class RemoteGroupRepository implements GroupRepository {
               scope == null ? null : scope.epoch(),
               runtime,
               timeoutNanos,
-              shutdownNanos);
+              shutdownNanos,
+              callback);
       if (!runtime.admit(handle)) {
         diagnostics.record("GLOBAL_REQUEST_CAPACITY", null);
         throw new RejectedExecutionException("Groups runtime capacity");

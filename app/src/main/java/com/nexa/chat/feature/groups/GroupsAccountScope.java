@@ -28,10 +28,10 @@ public final class GroupsAccountScope implements AutoCloseable {
   private final ArrayDeque<Runnable> pending = new ArrayDeque<>();
   private final List<GroupsCleanup.Job> resources = new ArrayList<>(),
       cleanupHistory = new ArrayList<>();
+  private final IdentityHashMap<Object, GroupsCleanup.Job> owned = new IdentityHashMap<>();
   private final Set<Listener> listeners = new LinkedHashSet<>(),
       accessListeners = new LinkedHashSet<>();
   private boolean closed, running, scheduled, accessDirty;
-  private int resourceCount;
   private int closedRegistrations;
 
   public GroupsAccountScope(
@@ -210,7 +210,8 @@ public final class GroupsAccountScope implements AutoCloseable {
         if (closed && closedRegistrations == LISTENER_CAPACITY)
           throw new RejectedExecutionException("Groups closed notification capacity");
         listener.job =
-            GroupsCleanup.reserve(() -> uiExecutor.execute(listener::deliver), diagnostics);
+            GroupsCleanup.reserveNotification(
+                () -> uiExecutor.execute(listener::deliver), diagnostics);
         if (!closed) target.add(listener);
         else {
           closedRegistrations++;
@@ -227,12 +228,19 @@ public final class GroupsAccountScope implements AutoCloseable {
    * Reserve before ownership transfer. Rejected factories remain responsible for unadopted objects.
    */
   public void own(Runnable cleanup) {
+    own(cleanup, cleanup);
+  }
+
+  /** Same concrete resource is adopted/closed once, including registration after scope closure. */
+  public void own(Object resource, Runnable cleanup) {
+    Objects.requireNonNull(resource);
     Objects.requireNonNull(cleanup);
     synchronized (lock) {
-      if (resourceCount == RESOURCE_CAPACITY)
+      if (owned.containsKey(resource)) return;
+      if (owned.size() == RESOURCE_CAPACITY)
         throw new RejectedExecutionException("Groups resource capacity");
       GroupsCleanup.Job job = GroupsCleanup.reserve(cleanup, diagnostics);
-      resourceCount++;
+      owned.put(resource, job);
       cleanupHistory.add(job);
       if (closed) job.submit();
       else resources.add(job);

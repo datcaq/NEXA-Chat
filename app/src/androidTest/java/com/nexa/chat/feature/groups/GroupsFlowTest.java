@@ -75,6 +75,31 @@ public class GroupsFlowTest {
     InstrumentationRegistry.getInstrumentation().waitForIdleSync();
   }
 
+  private java.util.concurrent.CountDownLatch observeDestruction(
+      ActivityScenario<GroupsActivity> scenario) {
+    java.util.concurrent.CountDownLatch destroyed = new java.util.concurrent.CountDownLatch(1);
+    scenario.onActivity(
+        activity ->
+            activity
+                .getLifecycle()
+                .addObserver(
+                    (androidx.lifecycle.LifecycleEventObserver)
+                        (owner, event) -> {
+                          if (event == androidx.lifecycle.Lifecycle.Event.ON_DESTROY)
+                            destroyed.countDown();
+                        }));
+    return destroyed;
+  }
+
+  private void awaitDestruction(java.util.concurrent.CountDownLatch destroyed) throws Exception {
+    Assert.assertTrue(
+        "Scope close must actually destroy the old Activity",
+        destroyed.await(10, java.util.concurrent.TimeUnit.SECONDS));
+    // ON_DESTROY occurs during the main-thread destruction transaction. Let ActivityScenario's
+    // lifecycle monitor observe that same transaction, not just the earlier finish() handoff.
+    InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+  }
+
   @Test
   public void createFromFriendsAndPhoneThenInspectPending() throws Exception {
     try (ActivityScenario<GroupsActivity> scenario =
@@ -101,6 +126,54 @@ public class GroupsFlowTest {
       onView(withSubstring("Đang chờ")).check(matches(isDisplayed()));
       capture("04-pending-invitations");
       Assert.assertEquals(List.of("friend", "phone-user"), groups.request.inviteeUserIds);
+    }
+  }
+
+  @Test
+  public void openedWhileSuspendedLoadsOnlyAfterSameEpochRecovery() {
+    access.set(GroupsAccountScope.Access.SUSPENDED);
+    UUID epoch = scope.epoch();
+    try (ActivityScenario<GroupsActivity> scenario =
+        ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withId(R.id.groups_controls)).check(matches(withEffectiveVisibility(Visibility.GONE)));
+      Assert.assertEquals(0, groups.listCalls);
+      scenario.onActivity(
+          activity -> {
+            access.set(GroupsAccountScope.Access.ACTIVE);
+            scope.sessionChanged();
+          });
+      onView(withText(R.string.groups_create)).check(matches(isDisplayed()));
+      Assert.assertEquals(1, groups.listCalls);
+      Assert.assertEquals(epoch, scope.epoch());
+      scenario.onActivity(
+          activity -> {
+            access.set(GroupsAccountScope.Access.SUSPENDED);
+            scope.sessionChanged();
+          });
+      onView(withId(R.id.groups_controls)).check(matches(withEffectiveVisibility(Visibility.GONE)));
+      scenario.onActivity(
+          activity -> {
+            access.set(GroupsAccountScope.Access.ACTIVE);
+            scope.sessionChanged();
+          });
+      onView(withText(R.string.groups_create)).check(matches(isDisplayed()));
+      Assert.assertEquals(1, groups.listCalls);
+    }
+  }
+
+  @Test
+  public void activityUnmountDoesNotLogOutOrCloseAccountOwnedRepository() {
+    try (ActivityScenario<GroupsActivity> scenario =
+        ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).check(matches(isDisplayed()));
+      scenario.recreate();
+      onView(withText(R.string.groups_create)).check(matches(isDisplayed()));
+    }
+    Assert.assertTrue(scope.isCurrent());
+    Assert.assertFalse(groups.closed);
+    try (ActivityScenario<GroupsActivity> next = ActivityScenario.launch(GroupsActivity.class)) {
+      onView(withText(R.string.groups_create)).check(matches(isDisplayed()));
+      Assert.assertFalse(groups.closed);
     }
   }
 
@@ -147,11 +220,13 @@ public class GroupsFlowTest {
   public void logoutFinishesOldGroupsActivityAndClosesRepository() throws Exception {
     try (ActivityScenario<GroupsActivity> scenario =
         ActivityScenario.launch(GroupsActivity.class)) {
+      var destroyed = observeDestruction(scenario);
       onView(withText(R.string.groups_create)).perform(click());
       onView(withId(R.id.groups_name_input))
           .perform(replaceText("Private draft"), closeSoftKeyboard());
       scenario.onActivity(activity -> GroupsIntegration.install(null));
       awaitScopeCleanup();
+      awaitDestruction(destroyed);
       InstrumentationRegistry.getInstrumentation().waitForIdleSync();
       Assert.assertEquals(androidx.lifecycle.Lifecycle.State.DESTROYED, scenario.getState());
       Assert.assertTrue(groups.closed);
@@ -164,6 +239,7 @@ public class GroupsFlowTest {
     groups.delay = true;
     try (ActivityScenario<GroupsActivity> scenario =
         ActivityScenario.launch(GroupsActivity.class)) {
+      var destroyed = observeDestruction(scenario);
       onView(withText(R.string.groups_create)).perform(click());
       onView(withId(R.id.groups_name_input))
           .perform(replaceText("Private group"), closeSoftKeyboard());
@@ -172,6 +248,7 @@ public class GroupsFlowTest {
       Assert.assertNotNull(groups.pending);
       scenario.onActivity(activity -> GroupsIntegration.install(null));
       awaitScopeCleanup();
+      awaitDestruction(destroyed);
       InstrumentationRegistry.getInstrumentation()
           .runOnMainSync(() -> groups.pending.success(groups.created()));
       InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -209,13 +286,23 @@ public class GroupsFlowTest {
       onView(withId(R.id.groups_name_input))
           .perform(replaceText("Keep during refresh"), closeSoftKeyboard());
       onView(withText(R.string.groups_submit)).perform(click());
+      // Positive control disambiguates the dialog title from the identically labelled button.
+      onView(
+              org.hamcrest.Matchers.allOf(
+                  withId(androidx.appcompat.R.id.alertTitle),
+                  withText(R.string.groups_confirm_title)))
+          .check(matches(isDisplayed()));
       scenario.onActivity(
           activity -> {
             access.set(GroupsAccountScope.Access.SUSPENDED);
             scope.sessionChanged();
           });
       onView(withText(R.string.groups_session_checking)).check(matches(isDisplayed()));
-      onView(withText(R.string.groups_confirm_title)).check(doesNotExist());
+      onView(
+              org.hamcrest.Matchers.allOf(
+                  withId(androidx.appcompat.R.id.alertTitle),
+                  withText(R.string.groups_confirm_title)))
+          .check(doesNotExist());
       onView(withId(R.id.groups_name_input))
           .check(matches(org.hamcrest.Matchers.not(isDisplayed())));
       Assert.assertFalse(groups.closed);
@@ -246,6 +333,7 @@ public class GroupsFlowTest {
 
   static class Fixture implements GroupRepository {
     boolean closed;
+    int listCalls;
 
     public void close() {
       closed = true;
@@ -258,6 +346,7 @@ public class GroupsFlowTest {
     Result<Created> pending;
 
     public void groups(int p, Result<Page<Summary>> c) {
+      listCalls++;
       c.success(new Page<>());
     }
 

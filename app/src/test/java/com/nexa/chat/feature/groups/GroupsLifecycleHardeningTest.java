@@ -27,6 +27,64 @@ public class GroupsLifecycleHardeningTest {
   }
 
   @Test
+  public void closedNotificationDoesNotWaitBehindBlockedPhysicalCleanup() throws Exception {
+    CountDownLatch occupied = new CountDownLatch(2), release = new CountDownLatch(1);
+    GroupsAccountScope retiring = scope(() -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
+    for (int i = 0; i < 2; i++)
+      retiring.own(
+          () -> {
+            occupied.countDown();
+            try {
+              assertTrue(release.await(5, TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+              throw new AssertionError(e);
+            }
+          });
+    retiring.close();
+    try {
+      assertTrue(occupied.await(5, TimeUnit.SECONDS));
+      CountDownLatch notification = new CountDownLatch(1);
+      GroupsAccountScope current = scope(() -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
+      current.onClosed(notification::countDown);
+      current.close();
+      assertTrue(
+          "Terminal UI handoff must not queue behind physical resource cleanup",
+          notification.await(1, TimeUnit.SECONDS));
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  public void resourceIdentityIsAdoptedOnceBeforeAndAfterClosure() throws Exception {
+    GroupsAccountScope s = scope(() -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
+    Object resource = new Object();
+    AtomicInteger closes = new AtomicInteger();
+    for (int i = 0; i < 12; i++) s.own(resource, closes::incrementAndGet);
+    for (int i = 0; i < 7; i++) s.own(new Object(), closes::incrementAndGet);
+    assertThrows(
+        RejectedExecutionException.class, () -> s.own(new Object(), closes::incrementAndGet));
+    s.close();
+    assertTrue(s.awaitCleanup(5, TimeUnit.SECONDS));
+    assertEquals(8, closes.get());
+    s.own(resource, () -> fail("same adopted resource must not close twice"));
+    assertTrue(s.awaitCleanup(5, TimeUnit.SECONDS));
+    assertEquals(8, closes.get());
+  }
+
+  @Test
+  public void newResourceAfterClosureIsDisposedAndDeduplicated() throws Exception {
+    GroupsAccountScope s = scope(() -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
+    s.close();
+    Object resource = new Object();
+    AtomicInteger closes = new AtomicInteger();
+    s.own(resource, closes::incrementAndGet);
+    s.own(resource, closes::incrementAndGet);
+    assertTrue(s.awaitCleanup(5, TimeUnit.SECONDS));
+    assertEquals(1, closes.get());
+  }
+
+  @Test
   public void reentryQueuesWithoutHoldingStateLockOrRecursing() {
     GroupsAccountScope s = scope(() -> GroupsAccountScope.Access.ACTIVE, Runnable::run);
     List<Integer> order = new ArrayList<>();

@@ -92,7 +92,12 @@ public class GroupsActivity extends AppCompatActivity {
               finish();
             });
     vm.changed.observe(this, v -> render());
-    scopeAccess = dependencies.scope.onAccessChanged(this::render);
+    scopeAccess =
+        dependencies.scope.onAccessChanged(
+            () -> {
+              vm.ensureInitialLoad();
+              render();
+            });
     if (state == null || (!vm.busy && vm.detail == null && vm.groups.isEmpty())) vm.load(0);
   }
 

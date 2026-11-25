@@ -25,9 +25,9 @@ public final class GroupsIntegration {
       this.scope = java.util.Objects.requireNonNull(scope);
       try {
         this.groups = java.util.Objects.requireNonNull(groups);
-        scope.own(groups::close);
+        scope.own(groups, groups::close);
         this.people = java.util.Objects.requireNonNull(people);
-        scope.own(people::close);
+        scope.own(people, people::close);
         if (groups instanceof com.nexa.chat.feature.groups.data.RemoteGroupRepository)
           ((com.nexa.chat.feature.groups.data.RemoteGroupRepository) groups).bindScope(scope);
         if (!scope.userId().toString().equals(people.currentUserId()))
