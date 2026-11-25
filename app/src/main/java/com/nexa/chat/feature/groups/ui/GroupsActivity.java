@@ -229,7 +229,11 @@ public class GroupsActivity extends AppCompatActivity {
                 if (dependencies.chat == null)
                   Toast.makeText(this, R.string.groups_chat_missing, Toast.LENGTH_LONG).show();
                 else
-                  dependencies.scope.runIfCurrent(() -> dependencies.chat.open(this, vm.groupId()));
+                  dependencies.scope.dispatch(
+                      () -> {
+                        if (!isFinishing() && !isDestroyed() && vm.groupId() != null)
+                          dependencies.chat.open(this, vm.groupId());
+                      });
               });
         }
         break;

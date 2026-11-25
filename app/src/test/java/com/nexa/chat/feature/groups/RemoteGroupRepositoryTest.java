@@ -15,9 +15,16 @@ import retrofit2.converter.gson.GsonConverterFactory;
 public class RemoteGroupRepositoryTest {
   MockWebServer server;
   RemoteGroupRepository repository;
+  GroupsAccountScope scope;
 
   @Before
   public void setup() throws Exception {
+    scope =
+        new GroupsAccountScope(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            () -> GroupsAccountScope.Access.ACTIVE,
+            Runnable::run);
     server = new MockWebServer();
     server.start();
     repository =
@@ -28,12 +35,30 @@ public class RemoteGroupRepositoryTest {
                 .addConverterFactory(GsonConverterFactory.create())
                 .build()
                 .create(GroupApi.class));
+    repository.bindScope(scope);
   }
 
   @After
   public void close() throws Exception {
     repository.close();
+    scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     server.shutdown();
+    assertTrue(repository.awaitTermination(5, TimeUnit.SECONDS));
+  }
+
+  @Test
+  public void productionConstructorCannotDispatchWithoutBoundAccountScope() {
+    PendingCall<Summary> call = new PendingCall<>();
+    GroupApi api =
+        (GroupApi)
+            java.lang.reflect.Proxy.newProxyInstance(
+                GroupApi.class.getClassLoader(), new Class[] {GroupApi.class}, (p, m, a) -> call);
+    RemoteGroupRepository unbound = new RemoteGroupRepository(api);
+    assertThrows(RejectedExecutionException.class, () -> unbound.details("group", new Result<>()));
+    assertNull(call.callback);
+    assertEquals(0, unbound.inFlight());
+    unbound.close();
   }
 
   @Test
@@ -73,6 +98,7 @@ public class RemoteGroupRepositoryTest {
                 .addConverterFactory(GsonConverterFactory.create())
                 .build()
                 .create(GroupApi.class));
+    repository.bindScope(scope);
     server.enqueue(new MockResponse().setBody("{}"));
     Result<Summary> result = new Result<>();
     repository.details("group", result);
@@ -86,7 +112,7 @@ public class RemoteGroupRepositoryTest {
   }
 
   @Test
-  public void closeCancelsInflightRequestAndRejectsItsLateCallback() {
+  public void closeCancelsInflightRequestAndRejectsItsLateCallback() throws Exception {
     PendingCall<Summary> call = new PendingCall<>();
     GroupApi api =
         (GroupApi)
@@ -95,11 +121,14 @@ public class RemoteGroupRepositoryTest {
                 new Class[] {GroupApi.class},
                 (proxy, method, args) -> call);
     repository = new RemoteGroupRepository(api);
+    repository.bindScope(scope);
     Result<Summary> result = new Result<>();
     repository.details("group", result);
+    assertTrue(call.enqueued.await(5, TimeUnit.SECONDS));
     assertNotNull(call.callback);
     repository.close();
     repository.close();
+    assertTrue(call.cancelSignal.await(5, TimeUnit.SECONDS));
     assertTrue(call.cancelled);
     call.callback.onResponse(call, retrofit2.Response.success(new Summary()));
     call.callback.onFailure(call, new java.io.IOException("cancelled"));
@@ -116,14 +145,17 @@ public class RemoteGroupRepositoryTest {
                 new Class[] {GroupApi.class},
                 (proxy, method, args) -> call);
     repository = new RemoteGroupRepository(api);
+    repository.bindScope(scope);
     repository.close();
-    repository.details("group", new Result<>());
-    assertTrue(call.cancelled);
+    assertThrows(
+        RejectedExecutionException.class, () -> repository.details("group", new Result<>()));
+    assertFalse(call.cancelled);
     assertNull(call.callback);
   }
 
   static class PendingCall<T> implements retrofit2.Call<T> {
-    boolean cancelled;
+    volatile boolean cancelled;
+    final CountDownLatch enqueued = new CountDownLatch(1), cancelSignal = new CountDownLatch(1);
     retrofit2.Callback<T> callback;
 
     public retrofit2.Response<T> execute() {
@@ -132,6 +164,7 @@ public class RemoteGroupRepositoryTest {
 
     public void enqueue(retrofit2.Callback<T> callback) {
       this.callback = callback;
+      enqueued.countDown();
     }
 
     public boolean isExecuted() {
@@ -140,6 +173,7 @@ public class RemoteGroupRepositoryTest {
 
     public void cancel() {
       cancelled = true;
+      cancelSignal.countDown();
     }
 
     public boolean isCanceled() {

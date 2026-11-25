@@ -65,8 +65,14 @@ public class GroupsFlowTest {
   }
 
   @After
-  public void cleanup() {
+  public void cleanup() throws Exception {
     GroupsIntegration.install(null);
+    awaitScopeCleanup();
+  }
+
+  private void awaitScopeCleanup() throws Exception {
+    Assert.assertTrue(scope.awaitCleanup(5, java.util.concurrent.TimeUnit.SECONDS));
+    InstrumentationRegistry.getInstrumentation().waitForIdleSync();
   }
 
   @Test
@@ -138,13 +144,14 @@ public class GroupsFlowTest {
   }
 
   @Test
-  public void logoutFinishesOldGroupsActivityAndClosesRepository() {
+  public void logoutFinishesOldGroupsActivityAndClosesRepository() throws Exception {
     try (ActivityScenario<GroupsActivity> scenario =
         ActivityScenario.launch(GroupsActivity.class)) {
       onView(withText(R.string.groups_create)).perform(click());
       onView(withId(R.id.groups_name_input))
           .perform(replaceText("Private draft"), closeSoftKeyboard());
       scenario.onActivity(activity -> GroupsIntegration.install(null));
+      awaitScopeCleanup();
       InstrumentationRegistry.getInstrumentation().waitForIdleSync();
       Assert.assertEquals(androidx.lifecycle.Lifecycle.State.DESTROYED, scenario.getState());
       Assert.assertTrue(groups.closed);
@@ -153,7 +160,7 @@ public class GroupsFlowTest {
   }
 
   @Test
-  public void lateCreateResponseAfterAccountReplacementCannotReopenOldGroup() {
+  public void lateCreateResponseAfterAccountReplacementCannotReopenOldGroup() throws Exception {
     groups.delay = true;
     try (ActivityScenario<GroupsActivity> scenario =
         ActivityScenario.launch(GroupsActivity.class)) {
@@ -164,6 +171,7 @@ public class GroupsFlowTest {
       onView(withId(android.R.id.button1)).perform(click());
       Assert.assertNotNull(groups.pending);
       scenario.onActivity(activity -> GroupsIntegration.install(null));
+      awaitScopeCleanup();
       InstrumentationRegistry.getInstrumentation()
           .runOnMainSync(() -> groups.pending.success(groups.created()));
       InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -173,7 +181,7 @@ public class GroupsFlowTest {
   }
 
   @Test
-  public void newEpochDoesNotRestoreOldAccountDraftAfterRecreation() {
+  public void newEpochDoesNotRestoreOldAccountDraftAfterRecreation() throws Exception {
     try (ActivityScenario<GroupsActivity> scenario =
         ActivityScenario.launch(GroupsActivity.class)) {
       onView(withText(R.string.groups_create)).perform(click());
@@ -182,6 +190,7 @@ public class GroupsFlowTest {
       scenario.recreate();
       onView(withId(R.id.groups_name_input)).check(matches(withText("Private draft")));
       scenario.onActivity(activity -> GroupsIntegration.install(null));
+      awaitScopeCleanup();
     }
     // A new authenticated scope is a new owner of all Groups dependencies and saved state.
     setup();

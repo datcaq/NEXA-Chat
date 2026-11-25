@@ -37,7 +37,7 @@ public class GroupsViewModelTest {
       };
 
   @Before
-  public void setup() {
+  public void setup() throws Exception {
     repository = new TestGroups();
     saved = new SavedStateHandle();
     scope =
@@ -47,7 +47,28 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void blankNameDoesNotCallServer() {
+  public void boundedRepositoryRejectionResetsBusyAndKeepsCreateRetryKey() {
+    TestGroups rejected =
+        new TestGroups() {
+          @Override
+          public void create(String key, Create request, GroupRepository.Result<Created> callback) {
+            throw new java.util.concurrent.RejectedExecutionException("injected capacity");
+          }
+        };
+    GroupsViewModel target =
+        new GroupsViewModel(new SavedStateHandle(), rejected, directory, scope);
+    target.name("Keep draft");
+    target.create();
+    assertFalse(target.busy);
+    assertEquals("REQUEST_CAPACITY", target.error);
+    assertEquals("Keep draft", target.name());
+    assertTrue(
+        scope.diagnostics().snapshot().stream()
+            .anyMatch(e -> e.code.equals("VIEWMODEL_REQUEST_REJECTED")));
+  }
+
+  @Test
+  public void blankNameDoesNotCallServer() throws Exception {
     vm.name("  ");
     vm.create();
     assertEquals("INVALID_NAME", vm.error);
@@ -55,7 +76,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void selectionIsUniqueAndRemovable() {
+  public void selectionIsUniqueAndRemovable() throws Exception {
     Person p = new Person("friend", "Friend", true);
     assertTrue(vm.toggle(p));
     assertEquals(1, vm.selected().size());
@@ -66,7 +87,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void networkRetryKeepsPayloadAndKey() {
+  public void networkRetryKeepsPayloadAndKey() throws Exception {
     vm.name(" Study ");
     vm.toggle(new Person("friend", "Friend", true));
     vm.create();
@@ -84,7 +105,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void changedRequestGetsNewKey() {
+  public void changedRequestGetsNewKey() throws Exception {
     vm.name("First");
     vm.create();
     String first = repository.key;
@@ -95,7 +116,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void successfulCreateOpensSharedConversationIdentity() {
+  public void successfulCreateOpensSharedConversationIdentity() throws Exception {
     vm.name("Study");
     vm.create();
     Created created = new Created();
@@ -110,7 +131,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void savedDraftAndSelectionSurviveNewViewModel() {
+  public void savedDraftAndSelectionSurviveNewViewModel() throws Exception {
     vm.name("Study");
     vm.toggle(new Person("friend", "Friend", true));
     vm.create();
@@ -123,7 +144,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void friendsAndSearchFailureRemainHonest() {
+  public void friendsAndSearchFailureRemainHonest() throws Exception {
     vm.show("create");
     assertEquals(1, vm.people.size());
     vm.search("+84912345678");
@@ -132,12 +153,13 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void logoutClearsDraftSelectionAndRejectsLateCreateSuccess() {
+  public void logoutClearsDraftSelectionAndRejectsLateCreateSuccess() throws Exception {
     vm.name("Private draft");
     vm.toggle(new Person("friend", "Friend", true));
     vm.create();
     GroupRepository.Result<Created> oldCallback = repository.pending;
     scope.close();
+    assertTrue(scope.awaitCleanup(5, java.util.concurrent.TimeUnit.SECONDS));
     assertEquals("", vm.name());
     assertTrue(vm.selected().isEmpty());
     assertNull(vm.groupId());
@@ -160,7 +182,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void newEpochCannotRestoreOldAccountDraftOrRetryKey() {
+  public void newEpochCannotRestoreOldAccountDraftOrRetryKey() throws Exception {
     vm.name("Private draft");
     vm.toggle(new Person("friend", "Friend", true));
     vm.create();
@@ -173,12 +195,13 @@ public class GroupsViewModelTest {
     assertNull(saved.get("key"));
     restored.name("New private draft");
     scope.close();
+    assertTrue(scope.awaitCleanup(5, java.util.concurrent.TimeUnit.SECONDS));
     assertEquals("New private draft", restored.name());
     assertEquals("", vm.name());
   }
 
   @Test
-  public void directoryResponseQueuedBeforeLogoutCannotRepopulatePeople() {
+  public void directoryResponseQueuedBeforeLogoutCannotRepopulatePeople() throws Exception {
     final GroupRepository.Result<Page<Person>>[] pending = new GroupRepository.Result[1];
     PeopleDirectory delayed =
         new PeopleDirectory() {
@@ -201,6 +224,7 @@ public class GroupsViewModelTest {
         new GroupsViewModel(new SavedStateHandle(), repository, delayed, scope);
     target.show("create");
     scope.close();
+    assertTrue(scope.awaitCleanup(5, java.util.concurrent.TimeUnit.SECONDS));
     Page<Person> response = new Page<>();
     response.items = List.of(new Person("old-user", "Private profile", true));
     pending[0].success(response);
@@ -209,7 +233,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void clearingViewModelRejectsLateCallbackWithinSameAccount() {
+  public void clearingViewModelRejectsLateCallbackWithinSameAccount() throws Exception {
     vm.name("Keep draft");
     vm.create();
     androidx.lifecycle.ViewModelStore store = new androidx.lifecycle.ViewModelStore();
@@ -224,7 +248,7 @@ public class GroupsViewModelTest {
   }
 
   @Test
-  public void transientRefreshSuspendsDeliveryWithoutLosingDraftOrRetryKey() {
+  public void transientRefreshSuspendsDeliveryWithoutLosingDraftOrRetryKey() throws Exception {
     java.util.concurrent.atomic.AtomicReference<GroupsAccountScope.Access> access =
         new java.util.concurrent.atomic.AtomicReference<>(GroupsAccountScope.Access.ACTIVE);
     GroupsAccountScope refreshing =

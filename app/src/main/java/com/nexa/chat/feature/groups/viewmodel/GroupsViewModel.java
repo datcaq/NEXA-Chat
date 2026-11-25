@@ -150,74 +150,78 @@ public final class GroupsViewModel extends ViewModel {
     createFailed = false;
     int token = ++generation;
     notifyChange();
-    switch (screen()) {
-      case "create":
-        GroupRepository.Result<Page<Person>> callback =
-            result(
-                token,
-                v -> {
-                  people = v.items;
-                  page = v.page;
-                  hasNext = v.hasNext;
-                });
-        if (query().isEmpty()) directory.friends(requestedPage, callback);
-        else directory.searchPhone(query(), requestedPage, callback);
-        break;
-      case "incoming":
-        repository.invitations(
-            requestedPage,
-            result(
-                token,
-                v -> {
-                  invitations = v.items;
-                  page = v.page;
-                  hasNext = v.hasNext;
-                }));
-        break;
-      case "members":
-        repository.members(
-            groupId(),
-            requestedPage,
-            result(
-                token,
-                v -> {
-                  members = v.items;
-                  page = v.page;
-                  hasNext = v.hasNext;
-                }));
-        break;
-      case "outgoing":
-        repository.outgoing(
-            groupId(),
-            requestedPage,
-            result(
-                token,
-                v -> {
-                  invitations = v.items;
-                  page = v.page;
-                  hasNext = v.hasNext;
-                }));
-        break;
-      case "detail":
-        repository.details(
-            groupId(),
-            result(
-                token,
-                v -> {
-                  detail = v;
-                  hasNext = false;
-                }));
-        break;
-      default:
-        repository.groups(
-            requestedPage,
-            result(
-                token,
-                v -> {
-                  groups = v.items;
-                  page = v.page;
-                  hasNext = v.hasNext;
-                }));
+    try {
+      switch (screen()) {
+        case "create":
+          GroupRepository.Result<Page<Person>> callback =
+              result(
+                  token,
+                  v -> {
+                    people = v.items;
+                    page = v.page;
+                    hasNext = v.hasNext;
+                  });
+          if (query().isEmpty()) directory.friends(requestedPage, callback);
+          else directory.searchPhone(query(), requestedPage, callback);
+          break;
+        case "incoming":
+          repository.invitations(
+              requestedPage,
+              result(
+                  token,
+                  v -> {
+                    invitations = v.items;
+                    page = v.page;
+                    hasNext = v.hasNext;
+                  }));
+          break;
+        case "members":
+          repository.members(
+              groupId(),
+              requestedPage,
+              result(
+                  token,
+                  v -> {
+                    members = v.items;
+                    page = v.page;
+                    hasNext = v.hasNext;
+                  }));
+          break;
+        case "outgoing":
+          repository.outgoing(
+              groupId(),
+              requestedPage,
+              result(
+                  token,
+                  v -> {
+                    invitations = v.items;
+                    page = v.page;
+                    hasNext = v.hasNext;
+                  }));
+          break;
+        case "detail":
+          repository.details(
+              groupId(),
+              result(
+                  token,
+                  v -> {
+                    detail = v;
+                    hasNext = false;
+                  }));
+          break;
+        default:
+          repository.groups(
+              requestedPage,
+              result(
+                  token,
+                  v -> {
+                    groups = v.items;
+                    page = v.page;
+                    hasNext = v.hasNext;
+                  }));
+      }
+    } catch (java.util.concurrent.RejectedExecutionException rejected) {
+      admissionRejected();
     }
   }
 
@@ -239,23 +243,27 @@ public final class GroupsViewModel extends ViewModel {
     createFailed = true;
     int token = ++generation;
     notifyChange();
-    repository.create(
-        key,
-        new Create(
-            title,
-            selected().stream().map(p -> p.id).collect(java.util.stream.Collectors.toList())),
-        result(
-            token,
-            v -> {
-              createFailed = false;
-              detail = v.group;
-              saved.set("group", v.group.conversation.id);
-              saved.set("screen", "detail");
-              saved.set("selected", new ArrayList<Person>());
-              saved.set("name", "");
-              saved.set("key", null);
-              hasNext = false;
-            }));
+    try {
+      repository.create(
+          key,
+          new Create(
+              title,
+              selected().stream().map(p -> p.id).collect(java.util.stream.Collectors.toList())),
+          result(
+              token,
+              v -> {
+                createFailed = false;
+                detail = v.group;
+                saved.set("group", v.group.conversation.id);
+                saved.set("screen", "detail");
+                saved.set("selected", new ArrayList<Person>());
+                saved.set("name", "");
+                saved.set("key", null);
+                hasNext = false;
+              }));
+    } catch (java.util.concurrent.RejectedExecutionException rejected) {
+      admissionRejected();
+    }
   }
 
   public void respond(Invitation invitation, boolean accept) {
@@ -264,15 +272,27 @@ public final class GroupsViewModel extends ViewModel {
     error = "";
     int token = ++generation;
     notifyChange();
-    repository.respond(
-        invitation.id,
-        accept,
-        result(
-            token,
-            v -> {
-              invitations = new ArrayList<>(invitations);
-              invitations.removeIf(i -> i.id.equals(v.id));
-            }));
+    try {
+      repository.respond(
+          invitation.id,
+          accept,
+          result(
+              token,
+              v -> {
+                invitations = new ArrayList<>(invitations);
+                invitations.removeIf(i -> i.id.equals(v.id));
+              }));
+    } catch (java.util.concurrent.RejectedExecutionException rejected) {
+      admissionRejected();
+    }
+  }
+
+  private void admissionRejected() {
+    scope.diagnostics().record("VIEWMODEL_REQUEST_REJECTED", null);
+    if (!ensureScope()) return;
+    busy = false;
+    error = "REQUEST_CAPACITY";
+    notifyChange();
   }
 
   private interface Apply<T> {
@@ -315,6 +335,10 @@ public final class GroupsViewModel extends ViewModel {
   }
 
   private boolean ownsSavedAccount() {
+    return scope.isCurrent() && matchesSavedOwner();
+  }
+
+  private boolean matchesSavedOwner() {
     return scope.userId().toString().equals(saved.get("scope.user"))
         && scope.epoch().toString().equals(saved.get("scope.epoch"));
   }
@@ -328,7 +352,7 @@ public final class GroupsViewModel extends ViewModel {
 
   private void invalidate() {
     generation++;
-    if (ownsSavedAccount()) clearSavedAccount();
+    if (matchesSavedOwner()) clearSavedAccount();
     busy = false;
     hasNext = false;
     page = 0;

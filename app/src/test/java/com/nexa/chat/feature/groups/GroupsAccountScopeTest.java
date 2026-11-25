@@ -9,7 +9,7 @@ import org.junit.Test;
 
 public class GroupsAccountScopeTest {
   @Test
-  public void queuedSuccessIsSuppressedAfterClose() {
+  public void queuedSuccessIsSuppressedAfterClose() throws Exception {
     Queue<Runnable> tasks = new ArrayDeque<>();
     GroupsAccountScope scope =
         new GroupsAccountScope(
@@ -20,12 +20,13 @@ public class GroupsAccountScopeTest {
     AtomicInteger writes = new AtomicInteger();
     scope.dispatch(writes::incrementAndGet);
     scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     tasks.remove().run();
     assertEquals(0, writes.get());
   }
 
   @Test
-  public void latestSnapshotIsCheckedAtCallbackExecution() {
+  public void latestSnapshotIsCheckedAtCallbackExecution() throws Exception {
     Queue<Runnable> tasks = new ArrayDeque<>();
     AtomicReference<UUID> epoch = new AtomicReference<>(UUID.randomUUID());
     UUID captured = epoch.get();
@@ -44,12 +45,13 @@ public class GroupsAccountScopeTest {
     epoch.set(UUID.randomUUID());
     tasks.remove().run();
     assertEquals(0, writes.get());
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     assertEquals(1, cancelled.get());
     assertFalse(scope.isCurrent());
   }
 
   @Test
-  public void cleanupAndCloseNotificationAreIdempotent() {
+  public void cleanupAndCloseNotificationAreIdempotent() throws Exception {
     GroupsAccountScope scope =
         new GroupsAccountScope(
             UUID.randomUUID(),
@@ -60,13 +62,15 @@ public class GroupsAccountScopeTest {
     scope.own(cleanup::incrementAndGet);
     scope.onClosed(notifications::incrementAndGet);
     scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     assertEquals(1, cleanup.get());
     assertEquals(1, notifications.get());
   }
 
   @Test
-  public void detachedListenerDoesNotRetainOldActivity() {
+  public void detachedListenerDoesNotRetainOldActivity() throws Exception {
     GroupsAccountScope scope =
         new GroupsAccountScope(
             UUID.randomUUID(),
@@ -78,11 +82,12 @@ public class GroupsAccountScopeTest {
     registration.close();
     registration.close();
     scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     assertEquals(0, notifications.get());
   }
 
   @Test
-  public void queuedClosureNotificationCanBeCancelledOnDestroy() {
+  public void queuedClosureNotificationCanBeCancelledOnDestroy() throws Exception {
     Queue<Runnable> tasks = new ArrayDeque<>();
     GroupsAccountScope scope =
         new GroupsAccountScope(
@@ -93,13 +98,14 @@ public class GroupsAccountScopeTest {
     AtomicInteger notifications = new AtomicInteger();
     var registration = scope.onClosed(notifications::incrementAndGet);
     scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     registration.close();
     tasks.remove().run();
     assertEquals(0, notifications.get());
   }
 
   @Test
-  public void logoutDiscardsResponsesDeferredDuringRefresh() {
+  public void logoutDiscardsResponsesDeferredDuringRefresh() throws Exception {
     AtomicReference<GroupsAccountScope.Access> access =
         new AtomicReference<>(GroupsAccountScope.Access.SUSPENDED);
     GroupsAccountScope scope =
@@ -116,7 +122,7 @@ public class GroupsAccountScopeTest {
   }
 
   @Test
-  public void lateResourcesAreClosedImmediately() {
+  public void lateResourcesAreClosedAsynchronously() throws Exception {
     GroupsAccountScope scope =
         new GroupsAccountScope(
             UUID.randomUUID(),
@@ -124,13 +130,15 @@ public class GroupsAccountScopeTest {
             () -> GroupsAccountScope.Access.ACTIVE,
             Runnable::run);
     scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     AtomicInteger cleanup = new AtomicInteger();
     scope.own(cleanup::incrementAndGet);
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
     assertEquals(1, cleanup.get());
   }
 
   @Test
-  public void oneCleanupFailureDoesNotSkipOtherResourcesOrScreenClosure() {
+  public void oneCleanupFailureDoesNotSkipOtherResourcesOrScreenClosure() throws Exception {
     GroupsAccountScope scope =
         new GroupsAccountScope(
             UUID.randomUUID(),
@@ -144,14 +152,19 @@ public class GroupsAccountScopeTest {
         });
     scope.own(cleanup::incrementAndGet);
     scope.onClosed(notifications::incrementAndGet);
-    assertThrows(IllegalStateException.class, scope::close);
+    scope.close();
+    assertTrue(scope.awaitCleanup(5, TimeUnit.SECONDS));
+    assertTrue(
+        scope.diagnostics().snapshot().stream()
+            .anyMatch(
+                e -> e.code.equals("CLEANUP_FAILURE") && e.cause instanceof IllegalStateException));
     assertFalse(scope.isCurrent());
     assertEquals(1, cleanup.get());
     assertEquals(1, notifications.get());
   }
 
   @Test
-  public void closeAndStateMutationAreSerialized() throws Exception {
+  public void closeDoesNotWaitForAnAlreadyAdmittedAction() throws Exception {
     GroupsAccountScope scope =
         new GroupsAccountScope(
             UUID.randomUUID(),
@@ -186,9 +199,11 @@ public class GroupsAccountScopeTest {
                 scope.close();
               });
       assertTrue(closing.await(5, TimeUnit.SECONDS));
+      close.get(5, TimeUnit.SECONDS);
+      assertFalse(scope.isCurrent());
+      assertFalse(scope.runIfCurrent(mutations::incrementAndGet));
       release.countDown();
       callback.get(5, TimeUnit.SECONDS);
-      close.get(5, TimeUnit.SECONDS);
       assertFalse(scope.runIfCurrent(mutations::incrementAndGet));
       assertEquals(1, mutations.get());
     } finally {

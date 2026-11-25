@@ -1,13 +1,11 @@
 package com.nexa.chat.feature.groups;
 
 import java.util.*;
-import java.util.concurrent.Executor;
+import java.util.concurrent.*;
 import java.util.function.Supplier;
 
 /**
- * Groups resources for one already authenticated (user, epoch). This is not authentication. TV1
- * supplies a latest-snapshot predicate and the coordinator's serial UI executor. Invalidate this
- * scope before publishing a replacement account scope.
+ * Feature scope, not authentication. Host supplies prompt latest-session predicate and UI handoff.
  */
 public final class GroupsAccountScope implements AutoCloseable {
   public enum Access {
@@ -21,16 +19,20 @@ public final class GroupsAccountScope implements AutoCloseable {
     void close();
   }
 
-  private final UUID userId;
-  private final UUID epoch;
+  public static final int CALLBACK_CAPACITY = 32, RESOURCE_CAPACITY = 8, LISTENER_CAPACITY = 16;
+  private final UUID userId, epoch;
   private final Supplier<Access> currentSession;
   private final Executor uiExecutor;
+  private final GroupsDiagnostics diagnostics = new GroupsDiagnostics();
   private final Object lock = new Object();
-  private final List<Runnable> resources = new ArrayList<>();
-  private final Set<Listener> listeners = new LinkedHashSet<>();
-  private final Set<Listener> accessListeners = new LinkedHashSet<>();
-  private final List<Runnable> deferred = new ArrayList<>();
-  private boolean closed;
+  private final ArrayDeque<Runnable> pending = new ArrayDeque<>();
+  private final List<GroupsCleanup.Job> resources = new ArrayList<>(),
+      cleanupHistory = new ArrayList<>();
+  private final Set<Listener> listeners = new LinkedHashSet<>(),
+      accessListeners = new LinkedHashSet<>();
+  private boolean closed, running, scheduled, accessDirty;
+  private int resourceCount;
+  private int closedRegistrations;
 
   public GroupsAccountScope(
       UUID userId, UUID epoch, Supplier<Access> currentSession, Executor uiExecutor) {
@@ -48,108 +50,200 @@ public final class GroupsAccountScope implements AutoCloseable {
     return epoch;
   }
 
-  public boolean isCurrent() {
+  public GroupsDiagnostics diagnostics() {
+    return diagnostics;
+  }
+
+  private Access access() {
     synchronized (lock) {
-      return !closed && currentSession.get() != Access.EXPIRED;
+      if (closed) return Access.EXPIRED;
     }
+    Access value;
+    try {
+      value = Objects.requireNonNull(currentSession.get());
+    } catch (RuntimeException e) {
+      diagnostics.record("SESSION_PROJECTION_FAILURE", e);
+      close();
+      return Access.EXPIRED;
+    }
+    if (value == Access.EXPIRED) close();
+    synchronized (lock) {
+      return closed ? Access.EXPIRED : value;
+    }
+  }
+
+  public boolean isCurrent() {
+    return access() != Access.EXPIRED;
   }
 
   public boolean hasAccess() {
-    synchronized (lock) {
-      return !closed && currentSession.get() == Access.ACTIVE;
-    }
+    return access() == Access.ACTIVE;
   }
 
-  /** Check and mutation are serialized against close, including already queued callbacks. */
+  /** Nonwaiting immediate admission. An already claimed action may finish after close. */
   public boolean runIfCurrent(Runnable action) {
+    Objects.requireNonNull(action);
+    if (access() != Access.ACTIVE) return false;
     synchronized (lock) {
-      if (closed || currentSession.get() != Access.ACTIVE) return false;
-      action.run();
-      return true;
+      if (closed || running || !pending.isEmpty()) return false;
+      running = true;
+    }
+    try {
+      invoke(action);
+    } finally {
+      synchronized (lock) {
+        running = false;
+      }
+      schedule();
+    }
+    return true;
+  }
+
+  /** Existing void callers cannot handle overload: fail this feature closed, never host Auth. */
+  public void dispatch(Runnable action) {
+    if (!tryDispatch(action)) close();
+  }
+
+  public boolean tryDispatch(Runnable action) {
+    Objects.requireNonNull(action);
+    boolean rejected;
+    synchronized (lock) {
+      if (closed) return false;
+      rejected = pending.size() == CALLBACK_CAPACITY;
+      if (!rejected) pending.addLast(action);
+    }
+    if (rejected) {
+      diagnostics.record("CALLBACK_CAPACITY", null);
+      return false;
+    }
+    schedule();
+    return true;
+  }
+
+  private void schedule() {
+    synchronized (lock) {
+      if (closed || scheduled || running || (pending.isEmpty() && !accessDirty)) return;
+      scheduled = true;
+    }
+    try {
+      uiExecutor.execute(this::drain);
+    } catch (RuntimeException e) {
+      synchronized (lock) {
+        scheduled = false;
+      }
+      diagnostics.record("UI_HANDOFF_REJECTED", e);
+      close();
     }
   }
 
-  public void dispatch(Runnable action) {
-    uiExecutor.execute(() -> deliver(action));
+  private void drain() {
+    synchronized (lock) {
+      scheduled = false;
+      if (closed || running) return;
+      running = true;
+    }
+    boolean paused = false;
+    try {
+      for (; ; ) {
+        Access latest = access(); // NEVER call the external supplier under state lock.
+        paused = latest != Access.ACTIVE;
+        Runnable action;
+        List<Listener> controls = Collections.emptyList();
+        synchronized (lock) {
+          if (closed) return;
+          if (accessDirty) {
+            accessDirty = false;
+            controls = new ArrayList<>(accessListeners);
+          }
+          action = latest == Access.ACTIVE ? pending.pollFirst() : null;
+        }
+        for (Listener listener : controls) listener.deliver();
+        if (action == null) return;
+        synchronized (lock) {
+          if (closed) return;
+        } // controls may have invalidated us
+        invoke(action); // admission claim above is serialized with invalidation
+      }
+    } finally {
+      boolean wake;
+      synchronized (lock) {
+        running = false;
+        wake = !closed && (accessDirty || (!paused && !pending.isEmpty()));
+      }
+      if (wake) schedule();
+    }
   }
 
-  private void deliver(Runnable action) {
+  private void invoke(Runnable action) {
+    try {
+      action.run();
+    } catch (RuntimeException e) {
+      diagnostics.record("CALLBACK_FAILURE", e);
+    }
+  }
+
+  public void sessionChanged() {
+    if (access() == Access.EXPIRED) return;
     synchronized (lock) {
       if (closed) return;
-      Access access = Objects.requireNonNull(currentSession.get());
-      if (access == Access.SUSPENDED) {
-        deferred.add(action);
-        return;
-      }
-      if (access == Access.ACTIVE) {
-        action.run();
-        return;
-      }
+      accessDirty = true;
     }
-    close();
-  }
-
-  /** TV1 calls this on each latest session snapshot; suspension is not logout. */
-  public void sessionChanged() {
-    uiExecutor.execute(
-        () -> {
-          List<Runnable> pending;
-          List<Listener> observers;
-          Access access;
-          synchronized (lock) {
-            if (closed) return;
-            access = Objects.requireNonNull(currentSession.get());
-            pending = access == Access.ACTIVE ? new ArrayList<>(deferred) : Collections.emptyList();
-            if (access == Access.ACTIVE) deferred.clear();
-            observers = new ArrayList<>(accessListeners);
-          }
-          if (access == Access.EXPIRED) {
-            close();
-            return;
-          }
-          for (Runnable action : pending) deliver(action);
-          for (Listener observer : observers) observer.deliver();
-        });
+    schedule();
   }
 
   public Registration onAccessChanged(Runnable action) {
-    Listener listener = new Listener(Objects.requireNonNull(action), false);
+    return listen(action, false);
+  }
+
+  public Registration onClosed(Runnable action) {
+    return listen(action, true);
+  }
+
+  private Registration listen(Runnable action, boolean once) {
+    Objects.requireNonNull(action);
+    Listener listener = new Listener(action, once);
     synchronized (lock) {
-      if (!closed) accessListeners.add(listener);
+      Set<Listener> target = once ? listeners : accessListeners;
+      if (target.size() == LISTENER_CAPACITY)
+        throw new RejectedExecutionException("Groups listener capacity");
+      if (once) {
+        if (closed && closedRegistrations == LISTENER_CAPACITY)
+          throw new RejectedExecutionException("Groups closed notification capacity");
+        listener.job =
+            GroupsCleanup.reserve(() -> uiExecutor.execute(listener::deliver), diagnostics);
+        if (!closed) target.add(listener);
+        else {
+          closedRegistrations++;
+          cleanupHistory.add(listener.job);
+          listener.job.submit();
+        }
+      } else if (!closed) target.add(listener);
       else listener.active = false;
     }
     return listener;
   }
 
-  /** Own only feature-specific resources, never TV1's shared HTTP client or contacts module. */
+  /**
+   * Reserve before ownership transfer. Rejected factories remain responsible for unadopted objects.
+   */
   public void own(Runnable cleanup) {
     Objects.requireNonNull(cleanup);
     synchronized (lock) {
-      if (!closed) {
-        resources.add(cleanup);
-        return;
-      }
+      if (resourceCount == RESOURCE_CAPACITY)
+        throw new RejectedExecutionException("Groups resource capacity");
+      GroupsCleanup.Job job = GroupsCleanup.reserve(cleanup, diagnostics);
+      resourceCount++;
+      cleanupHistory.add(job);
+      if (closed) job.submit();
+      else resources.add(job);
     }
-    cleanup.run();
-  }
-
-  public Registration onClosed(Runnable listener) {
-    Objects.requireNonNull(listener);
-    Listener registration = new Listener(listener, true);
-    synchronized (lock) {
-      if (!closed) {
-        listeners.add(registration);
-        return registration;
-      }
-    }
-    uiExecutor.execute(registration::deliver);
-    return registration;
   }
 
   private final class Listener implements Registration {
     private final Runnable action;
-    private boolean active = true;
     private final boolean once;
+    private boolean active = true;
+    private GroupsCleanup.Job job;
 
     Listener(Runnable action, boolean once) {
       this.action = action;
@@ -162,50 +256,49 @@ public final class GroupsAccountScope implements AutoCloseable {
         listeners.remove(this);
         accessListeners.remove(this);
       }
+      if (job != null) job.cancelBeforeSubmission();
     }
 
     void deliver() {
       synchronized (lock) {
-        if (!active) return;
+        if (!active || (!once && closed)) return;
         if (once) active = false;
       }
-      action.run();
+      invoke(action);
     }
   }
 
   @Override
   public void close() {
-    List<Runnable> cleanup;
+    List<GroupsCleanup.Job> cleanup;
     List<Listener> notifications;
     synchronized (lock) {
       if (closed) return;
       closed = true;
-      deferred.clear();
+      pending.clear();
+      accessDirty = false;
       for (Listener listener : accessListeners) listener.active = false;
       accessListeners.clear();
       cleanup = new ArrayList<>(resources);
       resources.clear();
       notifications = new ArrayList<>(listeners);
       listeners.clear();
+      closedRegistrations = notifications.size();
+      for (Listener listener : notifications) cleanupHistory.add(listener.job);
     }
-    RuntimeException failure = null;
-    for (Runnable resource : cleanup) {
-      try {
-        resource.run();
-      } catch (RuntimeException e) {
-        if (failure == null) failure = new IllegalStateException("Groups scope cleanup failed");
-        failure.addSuppressed(e);
-      }
+    // No arbitrary external cleanup, observer invocation or join on the caller/UI.
+    for (Listener listener : notifications) listener.job.submit();
+    for (GroupsCleanup.Job resource : cleanup) resource.submit();
+  }
+
+  /** Background/test wait only: completed UI handoff is NOT UI-idle or transport termination. */
+  public boolean awaitCleanup(long timeout, TimeUnit unit) throws InterruptedException {
+    List<GroupsCleanup.Job> copy;
+    synchronized (lock) {
+      copy = new ArrayList<>(cleanupHistory);
     }
-    for (Listener listener : notifications) {
-      try {
-        uiExecutor.execute(listener::deliver);
-      } catch (RuntimeException e) {
-        if (failure == null)
-          failure = new IllegalStateException("Groups scope notification failed");
-        failure.addSuppressed(e);
-      }
-    }
-    if (failure != null) throw failure;
+    long deadline = System.nanoTime() + unit.toNanos(timeout);
+    for (GroupsCleanup.Job job : copy) if (!job.await(deadline - System.nanoTime())) return false;
+    return true;
   }
 }
