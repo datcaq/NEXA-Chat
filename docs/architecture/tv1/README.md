@@ -4,6 +4,15 @@
 
 This package records the recommendations and evidence from TV1 Architecture Review 01 and the bounded evidence update from Review 02. MASTER SPEC v2.0 is authoritative and the technical supplement adds implementation guidance. Both were read in full, including tables and appendices, and remain private. This package does not freeze team contracts.
 
+## TV1 Formal Owner Review — 26/11/2026
+
+TV1 confirmed the business-policy selections in the owner response. TV2/TV3 cross-review is pending, especially for **OTP + password** and **Message Requests**. Earlier proposals and baseline snapshots below are retained as history. The reconciliation records the current scope and evidence.
+
+- [Formal Owner Response D01–D30 and HC01–HC10](01-formal-owner-response-confirmed.md)
+- [TV1 confirmation checklist](05-human-owner-confirmation-confirmed.md)
+- [Shared owner handoff](TV1-shared-owner-handoff.md)
+- [Source reconciliation and policy changes](formal-owner-source-reconciliation.md)
+
 ## Review documents
 
 1. [Security and Auth Implementation Specification](security-auth-spec.md)
