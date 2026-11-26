@@ -22,8 +22,8 @@ Review target is the exact new PR17 publication HEAD, supplied in the PR descrip
 ## 3. TV2 — Tender0603 / Tiến Đạt
 
 - [ ] D08: explicit concurrence at current publication revision on registry charter/domain ownership/affected-owner review; supply missing shared transaction participation requirements.
-- [ ] D09/D13: commit-safe J allocator, rollback/gaps/overflow, new-period boundaries and exact empty snapshot/wire preserving future-floor metadata. No timestamp/nextval-reservation shortcut or fabricated legacy floor.
-- [ ] D10/D16/D17: persistence keys, READ<=DELIVERED, durable eligible device/viewport proof, safe per-message projection, no high-cursor leak and no merge across account/period/history revision; sender versus own visibility fixtures.
+- [ ] D09/D13: commit-safe J allocator, rollback/gaps/overflow, new-period boundaries and exact wire for selected future-open interval + snapshot H + period/future floor. No timestamp/nextval-reservation/UUID-order shortcut; legacy history activation waits for a proven safe allocator baseline/cutover, no fabricated floor.
+- [ ] D10/D16/D17: immutable audience-at-send internal eligibility, author exclusion, per-message projection and no any/all/count aggregate this phase; persistence keys, READ<=DELIVERED, durable device/viewport proof, no high-cursor leak or account/period/history-revision merging; sender versus own/former visibility fixtures.
 - [ ] D25: stable member/new-period rejoin via new invitation, OWNER cancellation/current inviter recheck, processed/ACTIVE409 compatibility, atomic invite/member/period/floor/facts. Identify exact DTO/schema/adapter gaps without changing them in this publication.
 - [ ] D12/D27: durable outbox/conversation/account facts, dedup/order/coverage and current recipient publication; no invented event types or blanket registry expansion.
 - [ ] D20/D26: unknown-commit reconciliation preserving original identity, usable-transaction conflict reread and canonical DIRECT uniqueness under current ACL. Do not change409 to200 without a joint scoped decision.

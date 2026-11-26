@@ -6,6 +6,8 @@
 
 TV3 selects D08 governance Alternative A; D09 stable member/fresh period/latest ACTIVE history with committed inclusive J+1; D10 privacy-first/no peer or former-member disclosure/no aggregate this phase; D25 controlled OWNER invitation lifecycle/new-invite fresh-period rejoin/preserved409. Physical strategy is explicitly **DEFER**. Exact rationale, provenance, constraints and implementation gaps are in the [Owner Decision Record](TV3_OWNER_DECISION_RECORD_01E3.md).
 
+The additional owner record supplied during publication fixes D09 future-open interval with snapshot H/period/future floor and conservative legacy activation, and D10 immutable audience-at-send internal eligibility with per-message projection. These are TV3 selections, not a new shared wire approval; current-audience/range alternatives are not selected. Original-user-file provenance is retained in the Owner Decision Record.
+
 TV2 01E.2C is newly available locally and was read completely. Its computed ZIP SHA256 is `54A1590F62F4455CA7A57C99F0CF69B50C47F094FCC5AFE920EE4EB5FA76B864`; entry SHA256 `7D87CA23EB298FA8BCFCC55216810555B7B131FAD4F86ACF3E62AA8C43095FF9`. There is no independent expected output digest; author-side fallback/file-not-created history remains intact. Its detailed-policy-pending assessment predates the present owner choices. Do not claim it already cross-approved the new policy.
 
 PR16 c48f75e published scoped TV1 confirmations, reported latest responses and attributed supplements in 01E.2C are distinct from a formal affected-owner sign-off. PR9 ea239b9 and PR17 prepublish727d018 have no submitted reviews. No missing signature is manufactured.
@@ -31,8 +33,8 @@ Architecture D-08 governance is not a blanket adoption of the full ADR, and arch
 | D06 | OPEN | Cross-review: DIRECT excluded from GROUP latest-period selection | TV1/TV2 retained-history/block/unfriend/unblock/reopen policy |
 | D07 | OPEN | Cross-review: feature/host ownership unchanged | TV1 composition + TV2 runtime + TV3 adapter; exact Host/admission/termination proof |
 | D08 | OPEN | Conditional shared adoption: TV3 selects governance Alternative A | TV1/TV2 affected-owner sign-off; custodian/lineage/reservation protocol; full ADR/TX not jointly adopted |
-| D09 | OPEN | Direct adoption: stable member/new period/latest ACTIVE, committed inclusive J+1; no P1 inheritance | TV2 allocator/wire/empty future-floor metadata/legacy mapping; TV1 privacy and separate DIRECT; TX DEFER |
-| D10 | OPEN | Direct adoption: privacy-first, eligible sender/own only, no peer/former disclosure, author excluded, no aggregate | TV1 privacy; TV2 persistence/wire/device/history-revision isolation; scope/P0 handling jointly recorded |
+| D09 | OPEN | Direct adoption: stable member/new period/latest ACTIVE, inclusive J+1, future-open interval/H/period/floor; no P1 inheritance | TV2 exact allocator/wire and safe legacy cutover; fail closed on unprovable watermark; TV1 privacy/separate DIRECT; TX DEFER |
+| D10 | OPEN | Direct adoption: privacy-first sender/own only, no peer/former disclosure; immutable audience-at-send internally, author excluded, per-message only, no aggregate | TV1 privacy; TV2 persistence/wire/device/history-revision isolation; scope/P0 handling jointly recorded |
 | D11 | OPEN | Cross-review: TV1/TV2 authentication/WSS boundary retained | Precise expiry/revoke/renewal/close/admission and physical evidence |
 | D12 | OPEN | Conditional shared adoption: durable facts atomically coupled to accepted membership | TV2 durable replay/account projection/outbox/order/coverage; physical protocol pending |
 | D13 | OPEN | Cross-review: committed J is required by adopted GROUP floor | TV2 allocator finalization/gaps/rollback/overflow; no allocator implementation selected |
