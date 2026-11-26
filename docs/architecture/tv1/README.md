@@ -1,0 +1,104 @@
+# NEXA Chat — TV1 Architecture Review Handoff
+
+**PROPOSED / PENDING APPROVAL** · Prepared for Tiến Đạt (TV2) and Hoàng Phúc (TV3)
+
+This package records the recommendations and evidence from TV1 Architecture Review 01 and the bounded evidence update from Review 02. MASTER SPEC v2.0 is authoritative and the technical supplement adds implementation guidance. Both were read in full, including tables and appendices, and remain private. This package does not freeze team contracts.
+
+## TV1 Formal Owner Review — 26/11/2026
+
+TV1 confirmed the business-policy selections in the owner response. TV2/TV3 cross-review is pending, especially for **OTP + password** and **Message Requests**. Earlier proposals and baseline snapshots below are retained as history. The reconciliation records the current scope and evidence.
+
+- [Formal Owner Response D01–D30 and HC01–HC10](01-formal-owner-response-confirmed.md)
+- [TV1 confirmation checklist](05-human-owner-confirmation-confirmed.md)
+- [Shared owner handoff](TV1-shared-owner-handoff.md)
+- [Source reconciliation and policy changes](formal-owner-source-reconciliation.md)
+
+## Review documents
+
+1. [Security and Auth Implementation Specification](security-auth-spec.md)
+2. [JWT and Session Lifecycle](jwt-session-lifecycle.md)
+3. [CORE-04A FIX1 Design and Regression Matrix](coordinator-fix1-design.md)
+4. [Composition Root and Home Integration](composition-root-integration.md)
+5. [Cross-team Decision Register and D-01–D-10 Review](cross-team-decision-register.md)
+
+[Security and Transport Contract Addendum V1](security-transport-addendum-v1.md) expands the WSS handshake, socket expiry, session revocation, refresh/replay, shared error policy and transport cancellation. TV2's reported directional agreement still needs the formal review of this revision and TV3 confirmation of Foundation stabilization.
+
+[Auth, User and Friend API Inventory](auth-user-friend-api-inventory.md) records the Day 1 implementation gaps and candidate wire contracts.
+
+## Verified GitHub baseline
+
+Base `origin/main`: [`8b730dccc171c6d55fd8ae127448ed2b6c5f23a4`](https://github.com/datcaq/NEXA-Chat/commit/8b730dccc171c6d55fd8ae127448ed2b6c5f23a4). PRs #4, #5, #7, #8, #10, #11 and #12 are merged. The following records describe the handoff snapshot.
+
+| PR | HEAD | State / official review |
+| --- | --- | --- |
+| [#6 Groups/backend](https://github.com/datcaq/NEXA-Chat/pull/6) | `45c90a7e5be28332ace723ba9789af01a52fd9c7` | Draft, MERGEABLE / BLOCKED, REVIEW_REQUIRED. New Android Groups lifecycle/request hardening and Phase 2A docs. Backend source unchanged between `d2141e2` and `45c90a7`. |
+| [#9 Messaging](https://github.com/datcaq/NEXA-Chat/pull/9) | `ea239b9f66a153ac9f848fd089e5d4dd8b8874e4` | Draft, MERGEABLE / BLOCKED, REVIEW_REQUIRED. Full Messaging Wire Contract V1 is unavailable in the reviewed evidence. |
+| [#13 Coordinator](https://github.com/datcaq/NEXA-Chat/pull/13) | `1c459c517cbfea06d1c071554a05c894157e157e` | Draft, MERGEABLE / BLOCKED, Tender0603 [CHANGES_REQUESTED](https://github.com/datcaq/NEXA-Chat/pull/13#pullrequestreview-6050049996). FIX1 remains design only. |
+| [#14 Contacts UI](https://github.com/datcaq/NEXA-Chat/pull/14) | `b448991c3176618cdb8eeed46ebacb38693d7dc8` | Draft, MERGEABLE / CLEAN, Tender0603 [APPROVED](https://github.com/datcaq/NEXA-Chat/pull/14#pullrequestreview-6050217696). Scope is Contacts UI Foundation. |
+| [#15 Home stabilization](https://github.com/datcaq/NEXA-Chat/pull/15) | `f3456179e01ec4d49c5088da07fd12f061a25910` | Draft, MERGEABLE / CLEAN, Tender0603 [APPROVED](https://github.com/datcaq/NEXA-Chat/pull/15#pullrequestreview-6049897781). Only `androidTest` changes. |
+
+## Source-confirmed readiness
+
+| Area | Existing implementation and limits |
+| --- | --- |
+| App Shell / Home | MainActivity still loads Auth preview. Home four-tabs and state restoration exist as foundation. #15 verifies a test-only host, not production WindowInsets or authenticated Home. **E1, E4** |
+| Auth / Session | E.164, Auth preview and registration challenge contract/attempt logic on main. Session V2 is a contract. #13 has an unimplemented FIX1 for observer resource-hook exceptions. No verified OTP/login, credential storage/refresh, runtime gate or real logout. **E2–E5, E12** |
+| Contacts / Friends / Block / Profile | #14 normalizes search input, renders availability/states and has test-only result fixtures. Real search, private/public profile, friendship, block and Home wiring remain to be implemented. **E6** |
+| Messaging | #9 has view/controller/router, execution lease, fake repository and proposed port. No demonstrated production transport, persisted Room outbox or mounted host. The fake is currently under the branch's main source set. **E7** |
+| Groups / Translation | #6 has Android lifecycle foundations and Spring/PostgreSQL Groups. The new Groups cleanup/request lifecycle remains separate from TV1 security runtime and does not fix #13. Shared directory and translation provider integration remain pending. Translation and Dual Chat Mode remain planned. **E8–E11, E13** |
+| Test evidence | Architecture Review 01 independently reproduced both #13 observer exceptions with a Java probe. Prior #15 candidate verification ran 44 unit and six instrumentation cases, with three passing full emulator runs on API 37. #6 Phase 2A reports 73 JVM tests and 25 backend tests, of which 13 use PostgreSQL Testcontainers, plus test APK compilation without device execution. These are different scopes and are not combined into an E2E result. **E4–E5, E13** |
+
+Contract readiness is partial. Shared backend and production E2E are incomplete. Coordinator gate behavior alone provides no evidence that TV2/TV3 checked credentials at actual request admission. OTP-only login is not frozen. Provider cost and real delivery remain unverified. D-08 has not been supplied in full. The TV3 manifest references the label, but the full ADR and team approval are unavailable. Flyway V1 history for shared or production-like databases is **UNKNOWN**.
+
+## Blocking decisions and entry to Phase 2
+
+1. Confirm rollout countries, provider and budget from real delivery tests. Approve login credentials, registration/profile onboarding, recovery and OTP quotas. See R01–R02.
+2. Confirm trusted principal, signing keys, issuer/audience, access/refresh lifetimes, refresh reuse and logout/revoke semantics. Keep Android storage outside backup and verify real REST/WS admission at the epoch gate. See R03–R10 and R18–R21.
+3. Approve minimal public profile, phone lookup privacy, block/friendship and DIRECT eligibility. Decide membership periods and latest-join history, sequence/read/delivered cursors, wire JSON and WS replay/revoke. TV2 supplies full Messaging Wire Contract V1 and TV3 supplies the ADR including D-08 if available. See R11–R19.
+4. Agree a small, separately reviewed backend extraction and verify sanitized Flyway history before shared schema work. Respect the existing V1 checksum and migration ownership. See R24–R25.
+5. Resolve P2 finding TV2-R13-01 before production Home gate. Review epoch ownership, shared HTTP, mount/unmount and navigation signatures with both feature owners. #15 and #14 can take separate review/authorized merge routes because they do not depend on the FIX1 or Phase 2 approval. Run the relevant integration regression against the new main before each merge. See R20–R23 and R26.
+
+## Backend Foundation readiness
+
+No separate backend baseline branch or PR was visible at the snapshot. The backend exists in #6 as one Spring Boot 3.5.16/Maven Java 21 project with PostgreSQL and Flyway. Hibernate validates the schema. V1 contains UUID-only users, shared conversations and current membership plus invitations, idempotency and write budgets. Group creation and invitation acceptance are transactional, but the one membership row per user/conversation cannot represent rejoin periods. The branch's global security beans and error handling need TV1 ownership before consolidation. **E9–E11, E13**
+
+Proposed PR boundary is a bootstrap deployable, local compose and env templates, runbook, security that denies by default, and isolated PostgreSQL/Testcontainers smoke tests with a test-only migration if needed. Only count Postgres tests if executed and not skipped. TV3 owns the baseline extraction, TV1 owns security/identity, TV2 reviews Conversation/Message readiness. Shared schema is a later PR with one version registry and explicit owners: TV1 for users/sessions, TV2 for conversations/messages and sequence, TV3 for membership/invitations. Confirm sanitized `flyway_schema_history` and checksum with environment owners. Keep applied V1 immutable and evolve forward. Do not copy all of #6 into a baseline or create a second backend. **E11, E13**
+
+## Integration plan within the existing 14 days
+
+These are effort and dependency estimates, not a new start date, deadline or commitment. Preserve the existing **Day 7 DIRECT demo, Day 11 P0 check, Day 14 completion/demo/handoff** if the actual time remaining permits. If a milestone is at risk, report the blocker to the team and keep the original acceptance criteria. Keep media, Profile, Block, i18n, Translation and Dual Chat Mode in scope tracking. Translation and Dual Chat Mode follow the P0 gate and retain the original message and per-user mode preference. [TV3 14-day checklist](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/docs/PROJECT_14_DAY_CHECKLIST.md#L779-L795)
+
+| Workstream | Owner → review | Effort and dependency | Acceptance evidence and PR boundary |
+| --- | --- | --- | --- |
+| Baseline and shared decisions | TV3 → TV1/TV2 | 1–2 days. Verify V1 and approve scope. | One deployable, Postgres/Flyway smoke, fail-closed security, env without secrets. Bootstrap PR separate from production shared schema and Groups. |
+| #15, #14 and FIX1 | TV1 → TV2, TV3 reviews integration | About 1 day for FIX1. Existing approvals are SHA-specific. | Separate PRs. Run Home regression on the new main and Contacts locale/DEX checks. FIX1 regression F01–F09 and re-review. |
+| Auth → Session → Home | TV1 → TV2/TV3 | 2–3 days Auth, 2–3 days runtime/mount with overlap where contracts allow. | Real registration/login, restore, refresh/expiry/switch, process death, four tabs and production insets. PR backend Auth, session adapter, then Shell. |
+| Contacts → Friends, Profile, Block and i18n | TV1 → TV2/TV3 | 2–3 days for core directory/friends after principal and privacy policy. Profile, Block and i18n can progress in owner-specific PRs. | Authorized E.164 search, hide/block, invite/accept, profile edit/localization and locale isolation. Directory/Friends server separate from Android wiring. |
+| DIRECT demo | TV2 → TV3, TV1 reviews security | 3–4 days after shared contract, with parallel domain tests. Target Day 7 if actual time permits. | Two real users/devices, canonical pair, send/ACK/persistence, retry/reconnect. Split server/transport from host integration. |
+| GROUP and media | TV3 Groups / TV2 media → TV1 security and cross-review | 3–4 days after shared pipeline. Target Day 11 P0. | Invite/accept, membership/roles, session and membership revoke, rejoin/history, image/file/video transfer with ACL and progress/error. Separate policy/migration and media transport PRs. |
+| Translation and Dual Chat Mode | TV3 → TV1/TV2 | After P0 gate, keep estimates conditional on provider contract. | Preserve original Message, choose language, switch per-user Normal/International mode, prove failure behavior and persistence. Separate feature PR. |
+| Integrated handoff | All owners | Allow 2 days for regression and demo. Preserve Day 14 goal. | Real two-account flow Auth→Home→Contacts→Friends→DIRECT→GROUP, media, profile/block/i18n and accepted P1 scope. Record actual XML, PostgreSQL runs, APK DEX and residual gaps. |
+
+## Source evidence index
+
+Links use fixed Git revisions. **Implemented** means verified source exists at that revision. **Proposed** means design awaiting a decision. **Test-only** records what was exercised without implying production readiness.
+
+| ID | Ref and source evidence |
+| --- | --- |
+| E1 | `8b730dc` MainActivity setup L8–17, launcher AuthFragment L2–6, Home selection L27–74. [Activity](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/MainActivity.java#L8-L17) · [Launcher](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/res/layout/activity_main.xml#L2-L6) · [Home](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/home/HomeFragment.java#L27-L74) |
+| E2 | `8b730dc` SessionRepository observation and transitions L10–79, SessionSnapshot L20–49, access policy L14–30, CredentialProvider L10–83. [Repository](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/auth/session/SessionRepository.java#L10-L79) · [Snapshot](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/auth/session/SessionSnapshot.java#L20-L49) · [Access policy](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/auth/session/SessionAccessPolicy.java#L14-L30) · [CredentialProvider](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/auth/session/CredentialProvider.java#L10-L83) |
+| E3 | `8b730dc` AuthRepository registration challenge and cancellation L5–40, AuthViewModel submit/attempt/preview L109–225. [AuthRepository](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/auth/AuthRepository.java#L5-L40) · [AuthViewModel](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/java/com/nexa/chat/feature/auth/AuthViewModel.java#L109-L225) |
+| E4 | `f345617` HomeFragmentTest tab state, view insets and shell tap L52–181. [Home instrumentation](https://github.com/datcaq/NEXA-Chat/blob/f345617/app/src/androidTest/java/com/nexa/chat/feature/home/HomeFragmentTest.java#L52-L181) |
+| E5 | `1c459c5` Coordinator start, reconciliation, retirement, close and retention L52–166. [SessionCoordinator](https://github.com/datcaq/NEXA-Chat/blob/1c459c5/app/src/main/java/com/nexa/chat/core/session/SessionCoordinator.java#L52-L166) · [P2 finding](https://github.com/datcaq/NEXA-Chat/pull/13#pullrequestreview-6050049996) |
+| E6 | `b448991` Contacts submit/render/save L90–183, normalization L16–25 and test locale/fixture L66–172. [ContactsFragment](https://github.com/datcaq/NEXA-Chat/blob/b448991/app/src/main/java/com/nexa/chat/feature/contacts/ContactsFragment.java#L90-L183) · [Input](https://github.com/datcaq/NEXA-Chat/blob/b448991/app/src/main/java/com/nexa/chat/feature/contacts/ContactsSearchInput.java#L16-L25) · [Tests](https://github.com/datcaq/NEXA-Chat/blob/b448991/app/src/androidTest/java/com/nexa/chat/feature/contacts/ContactsFragmentTest.java#L66-L172) |
+| E7 | `ea239b9` Messaging DIRECT L59–123 and invalidation L365–400, host state L46–76, routing L35–95, lease L26–57, wire proposal gaps. [DIRECT](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/ui/MessagingController.java#L59-L123) · [Invalidation](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/ui/MessagingController.java#L365-L400) · [View](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/ui/MessagingView.java#L46-L76) · [Router](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/ui/MessagingRouter.java#L35-L95) · [Lease](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/ui/MessagingExecution.java#L26-L57) · [TV2 decisions](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/DAY1_DECISIONS.md#L17-L80) · [Fake repository](https://github.com/datcaq/NEXA-Chat/blob/ea239b9/app/src/main/java/com/nexa/chat/feature/messaging/repository/FakeConversationRepository.java) |
+| E8 | `45c90a7` Groups integration/replacement L51 onward, scope dispatch L104 onward and close L272 onward, PeopleDirectory port L5–16. [Integration](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/app/src/main/java/com/nexa/chat/feature/groups/GroupsIntegration.java#L51) · [Scope](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/app/src/main/java/com/nexa/chat/feature/groups/GroupsAccountScope.java#L272) · [Activity](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/app/src/main/java/com/nexa/chat/feature/groups/ui/GroupsActivity.java) · [Directory](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/app/src/main/java/com/nexa/chat/feature/groups/repository/PeopleDirectory.java#L5-L16) · [Request handle](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/app/src/main/java/com/nexa/chat/feature/groups/data/GroupRequestHandle.java#L15) |
+| E9 | `d2141e2` unchanged in `45c90a7`. Groups JWT and filter L34–74, principal L21–34, errors L11–42. [Security](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/java/com/nexa/chat/backend/groups/GroupConfiguration.java#L34-L74) · [Principal](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/java/com/nexa/chat/backend/groups/GroupController.java#L21-L34) · [Errors](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/java/com/nexa/chat/backend/groups/GroupErrors.java#L11-L42) |
+| E10 | `d2141e2` unchanged backend. V1 L1–34, GroupService create L40–93, respond/active member L182–208, directory L5–12, PostgreSQL tests L22–35. [V1](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/resources/db/migration/V1__shared_conversations_and_group_invitations.sql#L1-L34) · [Create](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/java/com/nexa/chat/backend/groups/GroupService.java#L40-L93) · [Respond](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/java/com/nexa/chat/backend/groups/GroupService.java#L182-L208) · [Directory](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/main/java/com/nexa/chat/backend/groups/GroupDirectory.java#L5-L12) · [PostgreSQL](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/src/test/java/com/nexa/chat/backend/groups/GroupPostgresTest.java#L22-L35) |
+| E11 | `d2141e2` Maven L3–19, baseline proposal L14–84, historical Session V2 integration L9–79. [Maven](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/backend/pom.xml#L3-L19) · [Baseline proposal](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/docs/group-01/backend-baseline-proposal.md#L14-L84) · [Earlier Groups integration](https://github.com/datcaq/NEXA-Chat/blob/d2141e2/docs/group-01/session-v2-integration.md#L9-L79) |
+| E12 | `8b730dc` minSdk L7–15, manifest backup flags L5–8, backup XML templates. [Gradle](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/build.gradle.kts#L7-L15) · [Manifest](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/AndroidManifest.xml#L5-L8) · [Backup rules](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/res/xml/backup_rules.xml) · [Extraction rules](https://github.com/datcaq/NEXA-Chat/blob/8b730dc/app/src/main/res/xml/data_extraction_rules.xml) |
+| E13 | `45c90a7` Phase 2A evidence. Lifecycle/ownership L75–118 and tests/limits L120–152, baseline manifest L13–34, membership policy L13–39 and checklist L779–795. [Lifecycle](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/docs/group-01/PHASE2A_LIFECYCLE_REPORT.md#L75-L152) · [Manifest](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/docs/group-01/PHASE2A_BACKEND_MANIFEST.md#L13-L34) · [Membership](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/docs/group-01/PHASE2A_MEMBERSHIP_POLICY.md#L13-L39) · [Checklist](https://github.com/datcaq/NEXA-Chat/blob/45c90a7/docs/PROJECT_14_DAY_CHECKLIST.md#L779-L795) |
+
+## Summary for reviewers
+
+Approve or request changes on the proposed decisions and identify any missing evidence. Treat #15/#14 as independently reviewed foundation work. Keep FIX1 separate and require re-review of #13. For Phase 2, prioritize one backend baseline, immutable applied V1, trusted principal and Auth/Session wire approval. Then verify real Auth → Session → Home → Contacts → Friends → DIRECT → GROUP with media and the remaining product acceptance gates.
