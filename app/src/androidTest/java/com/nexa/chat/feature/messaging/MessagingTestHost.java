@@ -71,16 +71,22 @@ final class MessagingTestHost implements AutoCloseable {
     private Window.Callback originalWindowCallback;
     private boolean appliedSelected;
     private boolean appliedResumed;
+    private boolean cleanupVerified;
 
     static MessagingTestHost launch() throws Exception {
         requireTestThread();
+        return launch(MessagingTestFixtures.create());
+    }
+
+    static MessagingTestHost launch(MessagingTestFixtures fixtures) throws Exception {
+        requireTestThread();
         MessagingTestHost host = new MessagingTestHost();
         try {
-            host.fixtures = MessagingTestFixtures.create();
+            host.fixtures = fixtures;
             host.execution = new MessagingExecution();
-            host.lease = host.execution.acquire(MessagingTestFixtures.USER, MessagingTestFixtures.EPOCH);
-            host.controller = new MessagingController(MessagingTestFixtures.USER,
-                    MessagingTestFixtures.EPOCH, host.fixtures.repository, host.lease);
+            host.lease = host.execution.acquire(fixtures.user, fixtures.epoch);
+            host.controller = new MessagingController(fixtures.user,
+                    fixtures.epoch, fixtures.client, host.lease);
             host.scenario = ActivityScenario.launch(MainActivity.class);
             host.scenario.onActivity(host::mount);
             return host;
@@ -122,6 +128,81 @@ final class MessagingTestHost implements AutoCloseable {
         diagnosticRoutes = controller.getRouter().observe(activity::runOnUiThread,
                 () -> diagnosticSnapshot("ROUTE_OBSERVER"));
         ViewCompat.requestApplyInsets(content);
+    }
+
+    // Lifecycle operations retain the account owner; all View/Activity access stays on main.
+    MessagingController account() { return controller; }
+    MessagingExecution runtime() { return execution; }
+    MessagingExecution.AccountLease accountLease() { return lease; }
+    Lifecycle.State scenarioState() { return scenario.getState(); }
+    boolean cleanupVerified() { return cleanupVerified; }
+
+    void inspectSurface(java.util.function.Consumer<MessagingView> assertion) {
+        scenario.onActivity(activity -> assertion.accept(surface));
+    }
+
+    void setHostState(boolean selected, boolean resumed) {
+        scenario.onActivity(activity -> {
+            appliedSelected = selected;
+            appliedResumed = resumed;
+            surface.setHostState(selected, resumed);
+        });
+    }
+
+    private void unmount() {
+        if (diagnosticRoutes != null) {
+            diagnosticRoutes.close();
+            diagnosticRoutes = null;
+        }
+        if (diagnosticActivity != null && originalWindowCallback != null) {
+            diagnosticActivity.getWindow().setCallback(originalWindowCallback);
+        }
+        if (diagnosticBack != null) diagnosticBack.setOnTouchListener(null);
+        diagnosticBack = null;
+        if (surface != null) {
+            surface.setHostState(false, false);
+            ViewGroup parent = (ViewGroup) surface.getParent();
+            if (parent != null) parent.removeView(surface);
+            assertFalse("Old surface detached", surface.isAttachedToWindow());
+        }
+        if (insetHost != null) {
+            ViewGroup parent = (ViewGroup) insetHost.getParent();
+            if (parent != null) parent.removeView(insetHost);
+        }
+        surface = null;
+        insetHost = null;
+        appliedSelected = false;
+        appliedResumed = false;
+    }
+
+    void detachSurface() {
+        requireTestThread();
+        scenario.onActivity(activity -> unmount());
+    }
+
+    void remountSurface() {
+        requireTestThread();
+        scenario.onActivity(activity -> {
+            unmount();
+            mount(activity);
+        });
+    }
+
+    void recreateActivity() {
+        requireTestThread();
+        detachSurface();
+        scenario.recreate();
+        scenario.onActivity(this::mount);
+    }
+
+    void invalidateAccount() { controller.invalidate(fixtures.epoch); }
+
+    void closeScenario() {
+        requireTestThread();
+        if (scenario.getState() != Lifecycle.State.DESTROYED) {
+            detachSurface();
+            scenario.close();
+        }
     }
 
     void recordComposer(String label) {
@@ -457,6 +538,7 @@ final class MessagingTestHost implements AutoCloseable {
 
     @Override public void close() throws Exception {
         requireTestThread();
+        if (cleanupVerified) return;
         List<Throwable> failures = new ArrayList<>();
         if (controller != null) {
             Log.i("MessagingUiSmoke", "Teardown route=" + controller.getRouter().currentRoute().getScreen());
@@ -486,7 +568,13 @@ final class MessagingTestHost implements AutoCloseable {
             failures.add(failure);
         }
         try {
-            if (controller != null) controller.invalidate(MessagingTestFixtures.EPOCH);
+            if (controller != null) controller.invalidate(fixtures.epoch);
+        } catch (Throwable failure) {
+            failures.add(failure);
+        }
+        try {
+            // Release held fake sources after invalidation, including assertion-failure paths.
+            if (fixtures != null) fixtures.releasePending();
         } catch (Throwable failure) {
             failures.add(failure);
         }
@@ -526,6 +614,7 @@ final class MessagingTestHost implements AutoCloseable {
             failures.add(failure);
         }
         MultipleFailureException.assertEmpty(failures);
+        cleanupVerified = true;
     }
 
     private static void requireTestThread() {

@@ -10,10 +10,14 @@ import com.nexa.chat.feature.messaging.model.OutboxEntry;
 import com.nexa.chat.feature.messaging.model.OutboxState;
 import com.nexa.chat.feature.messaging.model.ServerMessage;
 import com.nexa.chat.feature.messaging.repository.FakeConversationRepository;
+import com.nexa.chat.feature.messaging.repository.ConversationRepository;
+import com.nexa.chat.feature.messaging.repository.MessagePage;
 
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 
 /** Fresh fake per test: fixed account, peer and payloads; no network, clock or random-ID assertions. */
@@ -26,23 +30,48 @@ final class MessagingTestFixtures {
     static final String HISTORY_ROW = HISTORY + " · SENT";
     static final String COMPOSED_ROW = COMPOSED + " · SENT";
 
+    final UUID user, epoch;
+    final String peer, historyRow;
     final FakeConversationRepository repository;
+    final ConversationRepository client;
+    final ControlledRepository controlled;
     final Conversation conversation;
 
-    private MessagingTestFixtures(FakeConversationRepository repository, Conversation conversation) {
-        this.repository = repository;
-        this.conversation = conversation;
+    private MessagingTestFixtures(UUID user, UUID epoch, String peer, String history,
+                                  boolean controlled) throws Exception {
+        this.user = user;
+        this.epoch = epoch;
+        this.peer = peer;
+        this.historyRow = history + " · SENT";
+        repository = new FakeConversationRepository(user.toString());
+        // Seed through public fake APIs; generated IDs/timestamps remain opaque.
+        conversation = await(repository.openDirect(peer));
+        Message seed = new Message("33333333-3333-4333-8333-333333333333",
+                conversation.getId(), user.toString(), MessageType.TEXT, history);
+        assertEquals(OutboxState.SENT, await(repository.send(seed)).getState());
+        assertEquals(peer, conversation.getTitle());
+        this.controlled = controlled ? new ControlledRepository(repository) : null;
+        client = controlled ? this.controlled : repository;
     }
 
     static MessagingTestFixtures create() throws Exception {
-        FakeConversationRepository repository = new FakeConversationRepository(USER.toString());
-        // Only public fake APIs seed history. Generated server IDs/timestamps are intentionally opaque.
-        Conversation conversation = await(repository.openDirect(PEER));
-        Message seed = new Message("33333333-3333-4333-8333-333333333333",
-                conversation.getId(), USER.toString(), MessageType.TEXT, HISTORY);
-        assertEquals(OutboxState.SENT, await(repository.send(seed)).getState());
-        assertEquals(PEER, conversation.getTitle());
-        return new MessagingTestFixtures(repository, conversation);
+        return new MessagingTestFixtures(USER, EPOCH, PEER, HISTORY, false);
+    }
+
+    static MessagingTestFixtures controlled(UUID user, UUID epoch, String peer, String history)
+            throws Exception {
+        return new MessagingTestFixtures(user, epoch, peer, history, true);
+    }
+
+    void assertSeedOnly() throws Exception {
+        assertEquals("Only seeded server history", 1,
+                await(repository.listMessages(conversation.getId())).size());
+        assertEquals("Only seeded outbox", 1,
+                await(repository.listOutbox(conversation.getId())).size());
+    }
+
+    void releasePending() {
+        if (controlled != null) controlled.releasePending();
     }
 
     /** Supplement the visible once-only assertion with matching fake server and outbox evidence. */
@@ -66,7 +95,7 @@ final class MessagingTestFixtures {
             if (COMPOSED.equals(row.getMessage().getText())) {
                 outboxMatches++;
                 assertEquals(OutboxState.SENT, row.getState());
-                assertEquals(USER.toString(), row.getMessage().getSenderId());
+                assertEquals(user.toString(), row.getMessage().getSenderId());
                 assertEquals(sent.getMessage().getClientMessageId(),
                         row.getMessage().getClientMessageId());
                 assertNotNull(row.getAcknowledgement());
@@ -77,6 +106,83 @@ final class MessagingTestFixtures {
             }
         }
         assertEquals("UI send acknowledged exactly once", 1, outboxMatches);
+    }
+
+    /** One explicitly released send/history result; no timers, transport or worker blocking. */
+    static final class ControlledRepository implements ConversationRepository {
+        private final FakeConversationRepository delegate;
+        private CompletableFuture<OutboxEntry> sendResult;
+        private CompletableFuture<Message> sendEntered;
+        private CompletableFuture<List<ServerMessage>> historyResult;
+        private CompletableFuture<List<ServerMessage>> historyEntered;
+        private boolean holdSend, holdHistory;
+
+        ControlledRepository(FakeConversationRepository delegate) { this.delegate = delegate; }
+
+        synchronized void holdNextSend() {
+            if (sendResult != null) throw new IllegalStateException("One held send per fixture");
+            sendResult = new CompletableFuture<>();
+            sendEntered = new CompletableFuture<>();
+            holdSend = true;
+        }
+
+        synchronized void holdNextHistory() {
+            if (historyResult != null) throw new IllegalStateException("One held history per fixture");
+            historyResult = new CompletableFuture<>();
+            historyEntered = new CompletableFuture<>();
+            holdHistory = true;
+        }
+
+        void awaitSendEntered() throws Exception { await(sendEntered); }
+        void awaitHistoryEntered() throws Exception { await(historyEntered); }
+
+        void completeSend() throws Exception {
+            Message message = await(sendEntered);
+            sendResult.complete(await(delegate.send(message)));
+        }
+
+        void completeHistory() throws Exception { historyResult.complete(await(historyEntered)); }
+
+        synchronized void releasePending() {
+            if (sendResult != null) sendResult.completeExceptionally(
+                    new CancellationException("Test cleanup"));
+            if (historyResult != null) historyResult.completeExceptionally(
+                    new CancellationException("Test cleanup"));
+        }
+
+        @Override public synchronized CompletionStage<OutboxEntry> send(Message message) {
+            if (!holdSend) return delegate.send(message);
+            holdSend = false;
+            sendEntered.complete(message);
+            return sendResult;
+        }
+
+        @Override public CompletionStage<MessagePage> loadMessages(
+                String id, Long before, int limit) {
+            return delegate.loadMessages(id, before, limit);
+        }
+
+        @Override public CompletionStage<List<Conversation>> listConversations() {
+            return delegate.listConversations();
+        }
+        @Override public CompletionStage<Conversation> openDirect(String peer) {
+            return delegate.openDirect(peer);
+        }
+        @Override public synchronized CompletionStage<List<ServerMessage>> listMessages(String id) {
+            if (!holdHistory) return delegate.listMessages(id);
+            holdHistory = false;
+            delegate.listMessages(id).whenComplete((rows, error) -> {
+                if (error == null) historyEntered.complete(rows);
+                else historyEntered.completeExceptionally(error);
+            });
+            return historyResult;
+        }
+        @Override public CompletionStage<List<OutboxEntry>> listOutbox(String id) {
+            return delegate.listOutbox(id);
+        }
+        @Override public CompletionStage<Void> markRead(String id, ServerMessage through) {
+            return delegate.markRead(id, through);
+        }
     }
 
     private static <T> T await(CompletionStage<T> stage) throws Exception {
