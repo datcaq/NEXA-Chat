@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="messaging_space_small">4dp</dimen>
+    <dimen name="messaging_space">8dp</dimen>
+    <dimen name="messaging_space_medium">12dp</dimen>
+    <dimen name="messaging_space_large">16dp</dimen>
+    <dimen name="messaging_avatar">40dp</dimen>
+    <dimen name="messaging_touch_target">48dp</dimen>
+    <dimen name="messaging_conversation_height">72dp</dimen>
+    <dimen name="messaging_bubble_gutter">40dp</dimen>
+    <dimen name="messaging_corner">16dp</dimen>
+    <dimen name="messaging_stroke">1dp</dimen>
+    <dimen name="messaging_title_text">22sp</dimen>
+    <dimen name="messaging_header_text">18sp</dimen>
+    <dimen name="messaging_body_text">16sp</dimen>
+    <dimen name="messaging_caption_text">13sp</dimen>
+</resources>

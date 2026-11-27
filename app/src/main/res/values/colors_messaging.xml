@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="messaging_background">@color/home_background</color>
+    <color name="messaging_surface">@color/home_surface</color>
+    <color name="messaging_outline">@color/home_outline</color>
+    <color name="messaging_text">@color/home_text</color>
+    <color name="messaging_secondary">@color/home_secondary</color>
+    <color name="messaging_accent">@color/home_accent</color>
+    <color name="messaging_accent_container">@color/home_accent_container</color>
+</resources>

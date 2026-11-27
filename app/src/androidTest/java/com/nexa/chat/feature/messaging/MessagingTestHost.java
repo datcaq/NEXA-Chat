@@ -483,7 +483,8 @@ final class MessagingTestHost implements AutoCloseable {
                 return;
             }
             Insets edges = root.getInsets(
-                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
+                            | WindowInsetsCompat.Type.ime());
             int[] window = new int[2];
             int[] container = new int[2];
             decor.getLocationOnScreen(window);

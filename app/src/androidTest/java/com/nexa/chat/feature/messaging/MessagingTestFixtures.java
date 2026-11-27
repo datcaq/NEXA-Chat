@@ -39,6 +39,13 @@ final class MessagingTestFixtures {
 
     private MessagingTestFixtures(UUID user, UUID epoch, String peer, String history,
                                   boolean controlled) throws Exception {
+        this(user, epoch, peer, history, controlled, true, java.util.function.UnaryOperator.identity());
+    }
+
+    private MessagingTestFixtures(UUID user, UUID epoch, String peer, String history,
+                                  boolean controlled, boolean seedHistory,
+                                  java.util.function.UnaryOperator<ConversationRepository> decoration)
+            throws Exception {
         this.user = user;
         this.epoch = epoch;
         this.peer = peer;
@@ -48,10 +55,11 @@ final class MessagingTestFixtures {
         conversation = await(repository.openDirect(peer));
         Message seed = new Message("33333333-3333-4333-8333-333333333333",
                 conversation.getId(), user.toString(), MessageType.TEXT, history);
-        assertEquals(OutboxState.SENT, await(repository.send(seed)).getState());
+        if (seedHistory) assertEquals(OutboxState.SENT, await(repository.send(seed)).getState());
         assertEquals(peer, conversation.getTitle());
-        this.controlled = controlled ? new ControlledRepository(repository) : null;
-        client = controlled ? this.controlled : repository;
+        ConversationRepository projected = decoration.apply(repository);
+        this.controlled = controlled ? new ControlledRepository(projected) : null;
+        client = controlled ? this.controlled : projected;
     }
 
     static MessagingTestFixtures create() throws Exception {
@@ -61,6 +69,12 @@ final class MessagingTestFixtures {
     static MessagingTestFixtures controlled(UUID user, UUID epoch, String peer, String history)
             throws Exception {
         return new MessagingTestFixtures(user, epoch, peer, history, true);
+    }
+
+    /** Only for focused UI rendering/capture, not new transport or failure policies. */
+    static MessagingTestFixtures presentation(boolean seedHistory,
+            java.util.function.UnaryOperator<ConversationRepository> decoration) throws Exception {
+        return new MessagingTestFixtures(USER, EPOCH, PEER, HISTORY, true, seedHistory, decoration);
     }
 
     void assertSeedOnly() throws Exception {
@@ -110,14 +124,14 @@ final class MessagingTestFixtures {
 
     /** One explicitly released send/history result; no timers, transport or worker blocking. */
     static final class ControlledRepository implements ConversationRepository {
-        private final FakeConversationRepository delegate;
+        private final ConversationRepository delegate;
         private CompletableFuture<OutboxEntry> sendResult;
         private CompletableFuture<Message> sendEntered;
         private CompletableFuture<List<ServerMessage>> historyResult;
         private CompletableFuture<List<ServerMessage>> historyEntered;
         private boolean holdSend, holdHistory;
 
-        ControlledRepository(FakeConversationRepository delegate) { this.delegate = delegate; }
+        ControlledRepository(ConversationRepository delegate) { this.delegate = delegate; }
 
         synchronized void holdNextSend() {
             if (sendResult != null) throw new IllegalStateException("One held send per fixture");

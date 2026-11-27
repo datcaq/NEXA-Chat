@@ -1,11 +1,26 @@
 package com.nexa.chat.feature.messaging.ui;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.TextUtils;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.StyleSpan;
+import android.graphics.Typeface;
+import android.view.Gravity;
+import android.view.View;
+import android.view.inputmethod.EditorInfo;
 import android.widget.*;
+
+import androidx.core.view.ViewCompat;
+
+import com.nexa.chat.R;
 
 import com.nexa.chat.feature.messaging.model.*;
 import com.nexa.chat.feature.messaging.repository.ChatFailure;
@@ -40,6 +55,8 @@ public final class MessagingView extends LinearLayout {
     private String conversation;
     private int generation;
     private LinearLayout rows;
+    private LinearLayout feedback;
+    private ScrollView historyScroll;
     private EditText input;
     private final DraftInputOrigin inputOrigin = new DraftInputOrigin();
 
@@ -47,6 +64,7 @@ public final class MessagingView extends LinearLayout {
     public MessagingView(Context context, MessagingController controller, MessagingRouter router) {
         super(context);
         setOrientation(VERTICAL);
+        setBackgroundColor(context.getColor(R.color.messaging_background));
         this.controller = Objects.requireNonNull(controller);
         this.router = Objects.requireNonNull(router);
         if (router != controller.getRouter()) throw new IllegalArgumentException("Different account router");
@@ -104,13 +122,31 @@ public final class MessagingView extends LinearLayout {
         conversation = null;
         generation++;
         removeAllViews();
-        label(this, "Tin nhắn · FAKE DEMO");
+        input = null;
+        sendButton = null;
+        LinearLayout heading = section(this);
+        TextView title = label(heading, getContext().getString(R.string.messaging_title));
+        MessagingUi.textSize(title, R.dimen.messaging_title_text);
+        title.setTypeface(null, Typeface.BOLD);
+        ViewCompat.setAccessibilityHeading(title, true);
+        LinearLayout direct = new LinearLayout(getContext());
+        direct.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(direct);
         EditText peer = new EditText(getContext());
-        peer.setHint("Peer user ID");
-        addView(peer);
-        button(this, "Mở chat 1-1", () -> openDirect(peer.getText().toString().trim()));
+        peer.setHint(R.string.messaging_peer_hint);
+        peer.setSingleLine(true);
+        peer.setMinHeight(size(R.dimen.messaging_touch_target));
+        MessagingUi.textSize(peer, R.dimen.messaging_body_text);
+        peer.setTextColor(getContext().getColor(R.color.messaging_text));
+        peer.setHintTextColor(getContext().getColor(R.color.messaging_secondary));
+        direct.addView(peer, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        Button open = button(direct, getContext().getString(R.string.messaging_open_direct),
+                () -> openDirect(peer.getText().toString().trim()));
+        open.setLayoutParams(new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        feedback = section(this);
+        feedback.setVisibility(GONE);
         rows = list();
-        label(rows, "Đang tải…");
+        showLoading();
         await(controller.listConversations(), RequestKind.LIST);
     }
 
@@ -128,14 +164,49 @@ public final class MessagingView extends LinearLayout {
         conversation = id;
         generation++;
         removeAllViews();
-        button(this, "‹ Danh sách", this::handleBack);
-        label(this, name);
+        LinearLayout header = section(this);
+        header.setOrientation(HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setBackgroundColor(getContext().getColor(R.color.messaging_surface));
+        Button back = button(header, getContext().getString(R.string.messaging_back), this::handleBack);
+        back.setLayoutParams(new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        TextView title = label(header, name);
+        title.setLayoutParams(new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        title.setMaxLines(2);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        title.setContentDescription(name);
+        ViewCompat.setAccessibilityHeading(title, true);
+        title.setTypeface(null, Typeface.BOLD);
+        MessagingUi.textSize(title, R.dimen.messaging_header_text);
+        title.setCompoundDrawablesRelative(MessagingUi.avatar(getContext(), name), null, null, null);
+        title.setCompoundDrawablePadding(size(R.dimen.messaging_space));
         rows = list();
-        label(rows, "Đang tải…");
+        historyScroll.setId(R.id.messaging_history);
+        showLoading();
+        feedback = section(this);
+        feedback.setVisibility(GONE);
+        LinearLayout composer = section(this);
+        composer.setOrientation(HORIZONTAL);
+        composer.setGravity(Gravity.BOTTOM);
+        composer.setBackgroundColor(getContext().getColor(R.color.messaging_surface));
         input = new EditText(getContext());
-        input.setHint("Nhập tin nhắn");
+        input.setId(R.id.messaging_composer);
+        input.setHint(R.string.messaging_composer_hint);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+        input.setMinLines(1);
+        input.setMaxLines(4);
+        input.setMinHeight(size(R.dimen.messaging_touch_target));
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setTextColor(getContext().getColor(R.color.messaging_text));
+        input.setHintTextColor(getContext().getColor(R.color.messaging_secondary));
+        MessagingUi.textSize(input, R.dimen.messaging_body_text);
+        input.setBackground(MessagingUi.surface(getContext(), R.color.messaging_background, true));
+        int padding = size(R.dimen.messaging_space_medium);
+        input.setPadding(padding, padding, padding, padding);
         synchronizeDraft(controller.draft(id));
-        addView(input);
+        composer.addView(input, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
         input.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -146,11 +217,15 @@ public final class MessagingView extends LinearLayout {
             }
             @Override public void afterTextChanged(Editable s) {}
         });
-        sendButton = button(this, "Gửi", () -> {
+        sendButton = button(composer, getContext().getString(R.string.messaging_send), () -> {
             CompletionStage<OutboxEntry> request = controller.sendDraft(id);
             sendButton.setEnabled(!controller.isSending(id));
             await(request, RequestKind.SEND);
         });
+        sendButton.setId(R.id.messaging_send);
+        LayoutParams sendLayout = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        sendLayout.setMarginStart(size(R.dimen.messaging_space));
+        sendButton.setLayoutParams(sendLayout);
         sendButton.setEnabled(!controller.isSending(id));
         loadHistory();
     }
@@ -177,53 +252,67 @@ public final class MessagingView extends LinearLayout {
     private void onResult(RequestKind kind, Object value, Throwable error) {
         if (!controller.isActive()) { showInvalidated(); return; }
         if (kind == RequestKind.SEND) {
-            if (error != null) label(this, error(error));
+            if (error != null) showFeedback(error(error));
             return;
         }
         if (kind == RequestKind.DIRECT) {
             if (error != null) {
-                label(this, error(error));
-                button(this, "Quay lại", this::showList);
+                showFeedback(error(error));
+                button(feedback, getContext().getString(R.string.messaging_return), this::showList);
             }
             return;
         }
         if (kind == RequestKind.HISTORY) historyLoading = false;
+        // Follow new messages only while already at the end; keep a reader's older viewport.
+        boolean followEnd = !historyScroll.canScrollVertically(1);
+        int scrollY = historyScroll.getScrollY();
         rows.removeAllViews();
         if (kind == RequestKind.LIST) {
             if (error != null) {
                 label(rows, error(error));
-                button(rows, "Thử lại", this::refresh);
+                button(rows, getContext().getString(R.string.messaging_retry), this::refresh);
                 return;
             }
             List<Conversation> items = (List<Conversation>) value;
-            if (items.isEmpty()) label(rows, "Chưa có hội thoại");
-            for (Conversation item : items) button(rows, item.getTitle(), () -> {
-                router.openConversation(item.getId(), item.getTitle());
-            });
+            if (items.isEmpty()) showEmpty(R.string.messaging_empty_list,
+                    R.string.messaging_empty_list_detail);
+            for (Conversation item : items) {
+                Button row = button(rows, item.getTitle(), () ->
+                        router.openConversation(item.getId(), item.getTitle()));
+                row.setId(R.id.messaging_conversation);
+                row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                row.setMinHeight(size(R.dimen.messaging_conversation_height));
+                row.setBackgroundTintList(null);
+                row.setBackground(MessagingUi.rowBackground(getContext()));
+                row.setCompoundDrawablesRelative(MessagingUi.avatar(getContext(), item.getTitle()),
+                        null, null, null);
+                row.setCompoundDrawablePadding(size(R.dimen.messaging_space_medium));
+                row.setContentDescription(getContext().getString(
+                        R.string.messaging_open_conversation, item.getTitle()));
+                LayoutParams layout = (LayoutParams) row.getLayoutParams();
+                layout.bottomMargin = size(R.dimen.messaging_space);
+            }
             return;
         }
         List<OutboxEntry> entries = error == null ? (List<OutboxEntry>) value
                 : controller.localEntries(conversation);
         if (error != null) {
             label(rows, error(error));
-            button(rows, "Tải lại", this::refresh);
+            button(rows, getContext().getString(R.string.messaging_reload), this::refresh);
         }
+        if (error == null && entries.isEmpty()) showEmpty(R.string.messaging_empty_history,
+                R.string.messaging_empty_history_detail);
         for (OutboxEntry entry : entries) {
             if (!controller.isActive()) { showInvalidated(); return; }
-            Message message = entry.getMessage();
-            label(rows, message.getText() + " · " + entry.getState());
-            if ((entry.getState() == OutboxState.PENDING || entry.getState() == OutboxState.FAILED)
-                    && controller.canRetry(message.getClientMessageId())) {
-                button(rows, "Thử gửi lại", () ->
-                        await(controller.retry(message.getClientMessageId()), RequestKind.SEND));
-            }
+            renderMessage(entry);
         }
         if (!input.getText().toString().equals(controller.draft(conversation))) {
             synchronizeDraft(controller.draft(conversation));
         }
         Throwable failure = controller.lastFailure(conversation);
-        if (failure != null) label(rows, error(failure));
+        showFeedback(failure == null ? null : error(failure));
         sendButton.setEnabled(!controller.isSending(conversation));
+        restoreScroll(followEnd, scrollY);
         if (historyDirty) loadHistory();
     }
 
@@ -242,7 +331,9 @@ public final class MessagingView extends LinearLayout {
         rows = null;
         input = null;
         sendButton = null;
-        label(this, "Phiên nhắn tin đã kết thúc");
+        historyScroll = null;
+        feedback = null;
+        label(this, getContext().getString(R.string.messaging_invalidated));
     }
 
     @Override protected void onAttachedToWindow() {
@@ -267,6 +358,8 @@ public final class MessagingView extends LinearLayout {
         input = null;
         sendButton = null;
         conversation = null;
+        historyScroll = null;
+        feedback = null;
         // Detach is not logout. The retained controller still owns ACK/retry/draft state.
         super.onDetachedFromWindow();
     }
@@ -303,6 +396,12 @@ public final class MessagingView extends LinearLayout {
     private Button button(LinearLayout parent, String text, Runnable click) {
         Button button = new Button(getContext());
         button.setText(text);
+        button.setAllCaps(false);
+        button.setMinHeight(size(R.dimen.messaging_touch_target));
+        button.setTextColor(getContext().getColor(R.color.messaging_accent));
+        button.setBackgroundTintList(ColorStateList.valueOf(
+                getContext().getColor(R.color.messaging_accent_container)));
+        MessagingUi.textSize(button, R.dimen.messaging_body_text);
         button.setOnClickListener(view -> {
             if (controller.isActive() && presentation.isActive()) click.run();
             else if (!controller.isActive()) showInvalidated();
@@ -311,24 +410,151 @@ public final class MessagingView extends LinearLayout {
         return button;
     }
 
-    private void label(LinearLayout parent, String text) {
+    private TextView label(LinearLayout parent, String text) {
         TextView view = new TextView(getContext());
         view.setText(text);
+        view.setTextColor(getContext().getColor(R.color.messaging_text));
+        MessagingUi.textSize(view, R.dimen.messaging_body_text);
         parent.addView(view);
+        return view;
+    }
+
+    private int size(int resource) { return MessagingUi.size(getContext(), resource); }
+
+    private LinearLayout section(LinearLayout parent) {
+        LinearLayout section = new LinearLayout(getContext());
+        section.setOrientation(VERTICAL);
+        int padding = size(R.dimen.messaging_space_medium);
+        section.setPadding(padding, padding, padding, padding);
+        parent.addView(section, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        return section;
     }
 
     private LinearLayout list() {
         ScrollView scroll = new ScrollView(getContext());
+        scroll.setFillViewport(true);
         LinearLayout content = new LinearLayout(getContext());
         content.setOrientation(VERTICAL);
+        int padding = size(R.dimen.messaging_space_large);
+        content.setPadding(padding, padding, padding, padding);
         scroll.addView(content);
         addView(scroll, new LayoutParams(LayoutParams.MATCH_PARENT, 0, 1));
+        historyScroll = scroll;
         return content;
+    }
+
+    private void showLoading() {
+        LinearLayout loading = section(rows);
+        loading.setGravity(Gravity.CENTER_HORIZONTAL);
+        ProgressBar progress = new ProgressBar(getContext());
+        int target = size(R.dimen.messaging_avatar);
+        loading.addView(progress, new LayoutParams(target, target));
+        TextView text = label(loading, getContext().getString(R.string.messaging_loading));
+        text.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+    }
+
+    private void showEmpty(int title, int detail) {
+        LinearLayout state = section(rows);
+        TextView heading = label(state, getContext().getString(title));
+        heading.setTypeface(null, Typeface.BOLD);
+        TextView description = label(state, getContext().getString(detail));
+        description.setTextColor(getContext().getColor(R.color.messaging_secondary));
+    }
+
+    private void showFeedback(String text) {
+        feedback.removeAllViews();
+        feedback.setVisibility(text == null ? GONE : VISIBLE);
+        if (text != null) {
+            TextView message = label(feedback, text);
+            message.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+            MessagingUi.textSize(message, R.dimen.messaging_caption_text);
+        }
+    }
+
+    private void renderMessage(OutboxEntry entry) {
+        Message message = entry.getMessage();
+        boolean outgoing = controller.getCurrentUserId().toString().equals(message.getSenderId());
+        LinearLayout row = new LinearLayout(getContext());
+        row.setOrientation(HORIZONTAL);
+        LayoutParams rowLayout = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        rowLayout.bottomMargin = size(R.dimen.messaging_space_medium);
+        rows.addView(row, rowLayout);
+        Space gutter = new Space(getContext());
+        LayoutParams gutterLayout = new LayoutParams(size(R.dimen.messaging_bubble_gutter), 1);
+        if (outgoing) row.addView(gutter, gutterLayout);
+        LinearLayout lane = new LinearLayout(getContext());
+        lane.setOrientation(VERTICAL);
+        lane.setGravity(outgoing ? Gravity.END : Gravity.START);
+        row.addView(lane, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1));
+        if (!outgoing) row.addView(gutter, gutterLayout);
+        LinearLayout bubble = new LinearLayout(getContext());
+        bubble.setId(R.id.messaging_message_bubble);
+        bubble.setTag(outgoing);
+        bubble.setOrientation(VERTICAL);
+        bubble.setBackground(MessagingUi.surface(getContext(), outgoing
+                ? R.color.messaging_accent_container : R.color.messaging_surface, !outgoing));
+        int padding = size(R.dimen.messaging_space_medium);
+        bubble.setPadding(padding, padding, padding, padding);
+        lane.addView(bubble, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        String status = getContext().getString(MessagingUi.state(entry.getState()));
+        String rendered = getContext().getString(R.string.messaging_message_with_state,
+                message.getText(), status);
+        SpannableString styled = new SpannableString(rendered);
+        int statusStart = rendered.length() - status.length();
+        styled.setSpan(new RelativeSizeSpan(0.8f), statusStart, rendered.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        styled.setSpan(new StyleSpan(Typeface.BOLD), statusStart, rendered.length(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        TextView body = label(bubble, rendered);
+        body.setId(R.id.messaging_message_text);
+        body.setText(styled);
+        body.setContentDescription(getContext().getString(R.string.messaging_message_description,
+                getContext().getString(outgoing ? R.string.messaging_you : R.string.messaging_incoming),
+                message.getText(), getContext().getString(MessagingUi.stateDescription(entry.getState()))));
+        String timestamp = MessagingUi.timestamp(message.getCreatedAt());
+        if (!timestamp.isEmpty()) {
+            TextView time = label(bubble, timestamp);
+            time.setId(R.id.messaging_timestamp);
+            time.setTextColor(getContext().getColor(R.color.messaging_secondary));
+            MessagingUi.textSize(time, R.dimen.messaging_caption_text);
+        }
+        if (entry.getReceiptStatus() != MessageStatus.NONE) {
+            TextView receipt = label(bubble, getContext().getString(
+                    entry.getReceiptStatus() == MessageStatus.READ
+                            ? R.string.messaging_receipt_read : R.string.messaging_receipt_delivered));
+            MessagingUi.textSize(receipt, R.dimen.messaging_caption_text);
+        }
+        if ((entry.getState() == OutboxState.PENDING || entry.getState() == OutboxState.FAILED)
+                && controller.canRetry(message.getClientMessageId())) {
+            button(lane, getContext().getString(R.string.messaging_retry_send), () ->
+                    await(controller.retry(message.getClientMessageId()), RequestKind.SEND));
+        }
+    }
+
+    private void restoreScroll(boolean followEnd, int previousY) {
+        ScrollView target = historyScroll;
+        int version = generation;
+        target.post(() -> {
+            if (target != historyScroll || version != generation || !presentation.isActive()
+                    || !controller.isActive()) return;
+            // scrollTo never moves focus out of the editor.
+            target.scrollTo(0, followEnd ? rows.getHeight() : previousY);
+        });
     }
 
     private String error(Throwable error) {
         while (error.getCause() != null) error = error.getCause();
-        return error instanceof ChatFailure ? ((ChatFailure) error).getCode().name()
-                : "Không thực hiện được thao tác";
+        int resource = R.string.messaging_error;
+        if (error instanceof ChatFailure) {
+            switch (((ChatFailure) error).getCode()) {
+                case OFFLINE: resource = R.string.messaging_error_offline; break;
+                case TIMEOUT: resource = R.string.messaging_error_timeout; break;
+                case UNAUTHENTICATED: resource = R.string.messaging_error_auth; break;
+                case FORBIDDEN: resource = R.string.messaging_error_forbidden; break;
+                case CONFLICT: resource = R.string.messaging_error_conflict; break;
+                case INVALID_ARGUMENT: resource = R.string.messaging_error_invalid; break;
+            }
+        }
+        return getContext().getString(resource);
     }
 }
