@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="messaging_title">Tin nhắn · FAKE DEMO</string>
+    <string name="messaging_peer_hint">Peer user ID</string>
+    <string name="messaging_open_direct">Mở chat 1-1</string>
+    <string name="messaging_conversations">Hội thoại</string>
+    <string name="messaging_open_conversation">Mở hội thoại với %1$s</string>
+    <string name="messaging_back">‹ Danh sách</string>
+    <string name="messaging_composer_hint">Nhập tin nhắn</string>
+    <string name="messaging_send">Gửi</string>
+    <string name="messaging_loading">Đang tải…</string>
+    <string name="messaging_empty_list">Chưa có hội thoại</string>
+    <string name="messaging_empty_list_detail">Mở hội thoại 1-1 bằng ID người dùng ở trên.</string>
+    <string name="messaging_empty_history">Chưa có tin nhắn</string>
+    <string name="messaging_empty_history_detail">Viết tin nhắn đầu tiên cho hội thoại này.</string>
+    <string name="messaging_retry">Thử lại</string>
+    <string name="messaging_reload">Tải lại</string>
+    <string name="messaging_retry_send">Thử gửi lại</string>
+    <string name="messaging_return">Quay lại</string>
+    <string name="messaging_invalidated">Phiên nhắn tin đã kết thúc</string>
+    <string name="messaging_error">Không thực hiện được thao tác. Vui lòng thử lại.</string>
+    <string name="messaging_error_offline">Chưa có kết nối. Bạn có thể thử lại khi kết nối trở lại.</string>
+    <string name="messaging_error_timeout">Chưa nhận được xác nhận. Hãy thử gửi lại tin hiện có.</string>
+    <string name="messaging_error_auth">Phiên đăng nhập không còn hợp lệ.</string>
+    <string name="messaging_error_forbidden">Bạn không có quyền thực hiện thao tác này.</string>
+    <string name="messaging_error_conflict">Dữ liệu chưa khớp. Không thể tự gửi lại.</string>
+    <string name="messaging_error_invalid">Nội dung hoặc hội thoại không hợp lệ.</string>
+    <!-- Preserve the established visible outbox labels; descriptions explain them to TalkBack. -->
+    <string name="messaging_state_draft">DRAFT</string>
+    <string name="messaging_state_pending">PENDING</string>
+    <string name="messaging_state_sending">SENDING</string>
+    <string name="messaging_state_sent">SENT</string>
+    <string name="messaging_state_failed">FAILED</string>
+    <string name="messaging_state_draft_description">Bản nháp</string>
+    <string name="messaging_state_pending_description">Chờ gửi</string>
+    <string name="messaging_state_sending_description">Đang gửi</string>
+    <string name="messaging_state_sent_description">Đã được máy chủ xác nhận</string>
+    <string name="messaging_state_failed_description">Chưa gửi được</string>
+    <string name="messaging_receipt_delivered">Đã nhận</string>
+    <string name="messaging_receipt_read">Đã đọc</string>
+    <string name="messaging_you">Bạn</string>
+    <string name="messaging_incoming">Tin đến</string>
+    <string name="messaging_message_description">%1$s: %2$s. %3$s</string>
+    <string name="messaging_message_with_state">%1$s · %2$s</string>
+</resources>

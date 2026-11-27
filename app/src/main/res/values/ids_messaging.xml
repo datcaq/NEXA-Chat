@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="messaging_conversation" type="id" />
+    <item name="messaging_message_bubble" type="id" />
+    <item name="messaging_message_text" type="id" />
+    <item name="messaging_timestamp" type="id" />
+    <item name="messaging_history" type="id" />
+    <item name="messaging_composer" type="id" />
+    <item name="messaging_send" type="id" />
+</resources>
