@@ -37,6 +37,10 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback;
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitor;
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
+import androidx.test.runner.lifecycle.Stage;
 
 import com.google.android.material.textfield.TextInputLayout;
 import com.nexa.chat.MainActivity;
@@ -65,22 +69,20 @@ public final class ContactsFragmentTest {
 
     @Before
     public void recordConfiguration() {
-        originalNightMode = AppCompatDelegate.getDefaultNightMode();
+        instrumentation().runOnMainSync(() -> {
+            originalNightMode = AppCompatDelegate.getDefaultNightMode();
+            LocaleManager locales = frameworkLocaleManager();
+            originalLocales = locales != null
+                    ? LocaleListCompat.wrap(locales.getApplicationLocales())
+                    : AppCompatDelegate.getApplicationLocales();
+        });
     }
 
     @After
     public void restoreConfiguration() {
         instrumentation().runOnMainSync(() -> {
             AppCompatDelegate.setDefaultNightMode(originalNightMode);
-            if (originalLocales != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    LocaleManager locales = instrumentation().getTargetContext()
-                            .getSystemService(LocaleManager.class);
-                    locales.setApplicationLocales(LocaleList.forLanguageTags(originalLocales.toLanguageTags()));
-                } else {
-                    AppCompatDelegate.setApplicationLocales(originalLocales);
-                }
-            }
+            setApplicationLocales(originalLocales);
         });
     }
 
@@ -187,7 +189,6 @@ public final class ContactsFragmentTest {
     @Test
     public void productionLauncherStillShowsAuth() {
         try (ActivityScenario<MainActivity> host = ActivityScenario.launch(MainActivity.class)) {
-            originalLocales = AppCompatDelegate.getApplicationLocales();
             host.onActivity(activity -> {
                 assertNotNull(activity.findViewById(R.id.auth_title));
                 assertNull(activity.findViewById(R.id.contacts_screen));
@@ -238,28 +239,78 @@ public final class ContactsFragmentTest {
     }
 
     private ActivityScenario<MainActivity> launchContacts() {
-        ActivityScenario<MainActivity> host = ActivityScenario.launch(MainActivity.class);
-        host.onActivity(activity -> {
-            if (originalLocales == null) {
-                originalLocales = AppCompatDelegate.getApplicationLocales();
-            }
-            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"));
+        instrumentation().runOnMainSync(() -> {
+            setApplicationLocales(LocaleListCompat.forLanguageTags("en"));
             AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
         });
-        host.onActivity(activity -> {
-            activity.getSupportFragmentManager().beginTransaction()
-                    .replace(R.id.main_content, new ContactsFragment())
-                    .commitNow();
-            configureInsets(activity);
-        });
-        return host;
+        ActivityScenario<MainActivity> host = ActivityScenario.launch(MainActivity.class);
+        try {
+            host.onActivity(activity -> {
+                assertEquals("Contacts fixture should start in English", "en",
+                        resourceLanguage(activity));
+                activity.getSupportFragmentManager().beginTransaction()
+                        .replace(R.id.main_content, new ContactsFragment())
+                        .commitNow();
+                configureInsets(activity);
+            });
+            return host;
+        } catch (RuntimeException | Error failure) {
+            host.close();
+            throw failure;
+        }
     }
 
     private static void changeLanguage(ActivityScenario<MainActivity> host, String language) {
-        host.onActivity(activity ->
-                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(language)));
-        host.recreate();
-        host.onActivity(ContactsFragmentTest::configureInsets);
+        CountDownLatch localeApplied = new CountDownLatch(1);
+        ActivityLifecycleMonitor monitor = ActivityLifecycleMonitorRegistry.getInstance();
+        ActivityLifecycleCallback listener = (activity, stage) -> {
+            if (stage == Stage.RESUMED && activity instanceof MainActivity
+                    && language.equals(resourceLanguage((MainActivity) activity))) {
+                localeApplied.countDown();
+            }
+        };
+        instrumentation().runOnMainSync(() -> monitor.addLifecycleCallback(listener));
+        try {
+            host.onActivity(activity -> {
+                if (language.equals(resourceLanguage(activity))) {
+                    localeApplied.countDown();
+                } else {
+                    // The locale update relaunches the Activity asynchronously on API 33+.
+                    setApplicationLocales(LocaleListCompat.forLanguageTags(language));
+                }
+            });
+            assertTrue("Contacts never resumed with resource language " + language,
+                    localeApplied.await(15, TimeUnit.SECONDS));
+            host.onActivity(activity -> {
+                assertEquals(language, resourceLanguage(activity));
+                configureInsets(activity);
+            });
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted waiting for Contacts locale " + language,
+                    interrupted);
+        } finally {
+            instrumentation().runOnMainSync(() -> monitor.removeLifecycleCallback(listener));
+        }
+    }
+
+    private static String resourceLanguage(MainActivity activity) {
+        return activity.getResources().getConfiguration().getLocales().get(0).getLanguage();
+    }
+
+    private static LocaleManager frameworkLocaleManager() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? instrumentation().getTargetContext().getSystemService(LocaleManager.class)
+                : null;
+    }
+
+    private static void setApplicationLocales(LocaleListCompat locales) {
+        LocaleManager manager = frameworkLocaleManager();
+        if (manager != null) {
+            manager.setApplicationLocales(LocaleList.forLanguageTags(locales.toLanguageTags()));
+        } else {
+            AppCompatDelegate.setApplicationLocales(locales);
+        }
     }
 
     private static void configureInsets(MainActivity activity) {
