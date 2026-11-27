@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="contacts_title">Danh bạ</string>
+    <string name="contacts_search_title">Tìm bằng số điện thoại</string>
+    <string name="contacts_search_help">Chọn vùng hoặc nhập số quốc tế bắt đầu bằng dấu +.</string>
+    <string name="contacts_region_title">Quốc gia hoặc vùng</string>
+    <string name="contacts_choose_region">Chọn quốc gia hoặc vùng</string>
+    <string name="contacts_region_option">%1$s (+%2$d)</string>
+    <string name="contacts_phone">Số điện thoại</string>
+    <string name="contacts_search">Tìm kiếm</string>
+    <string name="contacts_phone_required">Nhập số điện thoại.</string>
+    <string name="contacts_phone_invalid">Kiểm tra số điện thoại và mã quốc gia.</string>
+    <string name="contacts_search_initial">Kết quả sẽ hiển thị ở đây khi tính năng tra cứu sẵn sàng.</string>
+    <string name="contacts_search_loading">Đang tìm kiếm…</string>
+    <string name="contacts_search_empty">Không tìm thấy kết quả.</string>
+    <string name="contacts_search_error">Không thể tìm kiếm. Hãy thử lại.</string>
+    <string name="contacts_search_unavailable">Bản này chưa hỗ trợ tra cứu số điện thoại. Chưa gửi yêu cầu tìm kiếm.</string>
+    <string name="contacts_invite">Gửi lời mời</string>
+    <string name="contacts_friends_title">Bạn bè</string>
+    <string name="contacts_friends_unavailable">Danh sách bạn bè chưa được kết nối.</string>
+    <string name="contacts_invitation_title">Lời mời kết bạn</string>
+    <string name="contacts_received">Đã nhận</string>
+    <string name="contacts_sent">Đã gửi</string>
+    <string name="contacts_received_unavailable">Chưa thể xem lời mời đã nhận.</string>
+    <string name="contacts_sent_unavailable">Chưa thể xem lời mời đã gửi.</string>
+</resources>
