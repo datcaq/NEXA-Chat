@@ -4,6 +4,8 @@ import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.TextView;
 
@@ -34,6 +36,7 @@ public final class AuthFragment extends Fragment {
     private final ViewModelProvider.Factory viewModelFactory;
     private AuthViewModel viewModel;
     private TextWatcher phoneWatcher;
+    private boolean ownsSecureWindowFlag;
     private String region;
 
     public AuthFragment() {
@@ -64,6 +67,23 @@ public final class AuthFragment extends Fragment {
         MaterialAutoCompleteTextView country = view.findViewById(R.id.auth_country);
         TextInputEditText phone = view.findViewById(R.id.auth_phone);
         TextInputEditText otp = view.findViewById(R.id.auth_otp);
+        TextInputEditText password = view.findViewById(R.id.auth_password);
+        TextInputLayout passwordField = view.findViewById(R.id.auth_password_field);
+        password.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence text, int start, int before, int count) {
+                protectPasswordFromCapture(text.length() != 0);
+                if (text.length() != 0) {
+                    passwordField.setError(null);
+                }
+            }
+
+            @Override
+            public void afterTextChanged(Editable text) {}
+        });
         TextInputLayout countryField = view.findViewById(R.id.auth_country_field);
         TextInputLayout phoneField = view.findViewById(R.id.auth_phone_field);
         TextInputLayout otpField = view.findViewById(R.id.auth_otp_field);
@@ -96,11 +116,18 @@ public final class AuthFragment extends Fragment {
                 }
             }
 
+            if (viewModel.screen() == AuthViewModel.Screen.SIGN_IN && password.length() == 0) {
+                passwordField.setError(getString(R.string.auth_error_password_required));
+                password.requestFocus();
+                return;
+            }
+
             if (!viewModel.submit(number, region)) {
                 phoneField.setError(getString(R.string.auth_error_phone_invalid));
                 phone.requestFocus();
                 return;
             }
+            password.setText(null);
             WindowCompat.getInsetsController(requireActivity().getWindow(), view)
                     .hide(WindowInsetsCompat.Type.ime());
         });
@@ -110,6 +137,8 @@ public final class AuthFragment extends Fragment {
             phoneField.setError(null);
             otpField.setError(null);
             otp.setText(null);
+            passwordField.setError(null);
+            password.setText(null);
             AuthViewModel.Screen next;
             switch (viewModel.screen()) {
                 case SIGN_IN:
@@ -154,6 +183,7 @@ public final class AuthFragment extends Fragment {
             phone.removeTextChangedListener(phoneWatcher);
             phoneWatcher = null;
         }
+        protectPasswordFromCapture(false);
         super.onDestroyView();
     }
 
@@ -161,6 +191,18 @@ public final class AuthFragment extends Fragment {
     public void onSaveInstanceState(@NonNull Bundle outState) {
         outState.putString(REGION_KEY, region);
         super.onSaveInstanceState(outState);
+    }
+
+    private void protectPasswordFromCapture(boolean containsPassword) {
+        Window window = requireActivity().getWindow();
+        int secureFlag = WindowManager.LayoutParams.FLAG_SECURE;
+        if (containsPassword && (window.getAttributes().flags & secureFlag) == 0) {
+            window.addFlags(secureFlag);
+            ownsSecureWindowFlag = true;
+        } else if (!containsPassword && ownsSecureWindowFlag) {
+            window.clearFlags(secureFlag);
+            ownsSecureWindowFlag = false;
+        }
     }
 
     private void setupCountries(MaterialAutoCompleteTextView country, TextInputLayout countryField,
@@ -218,7 +260,8 @@ public final class AuthFragment extends Fragment {
             description.setText(R.string.auth_challenge_description);
             submit.setText(R.string.auth_verify);
         } else {
-            description.setText(otp ? R.string.auth_otp_description : R.string.auth_phone_description);
+            description.setText(otp ? R.string.auth_otp_description
+                    : signIn ? R.string.auth_password_preview_description : R.string.auth_phone_description);
             submit.setText(otp ? R.string.auth_verify_preview : R.string.auth_continue);
         }
         TextInputLayout otpField = view.findViewById(R.id.auth_otp_field);
@@ -233,6 +276,9 @@ public final class AuthFragment extends Fragment {
         view.findViewById(R.id.auth_country_field).setEnabled(canChangeInput);
         view.findViewById(R.id.auth_phone_field).setEnabled(canChangeInput);
         otpField.setEnabled(!state.loading);
+        View passwordField = view.findViewById(R.id.auth_password_field);
+        passwordField.setVisibility(signIn ? View.VISIBLE : View.GONE);
+        passwordField.setEnabled(!state.loading);
         submit.setEnabled(!state.loading && !challengeReady);
         switchScreen.setEnabled(canChangeInput);
 

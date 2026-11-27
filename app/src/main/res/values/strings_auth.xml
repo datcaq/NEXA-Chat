@@ -29,4 +29,7 @@
     <string name="auth_challenge_unavailable">The service is unavailable. Check your connection and try again.</string>
     <string name="auth_challenge_rate_limited">Too many requests. Wait before trying again.</string>
     <string name="auth_challenge_rejected">The verification request could not be accepted.</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_error_password_required">Enter your password.</string>
+    <string name="auth_password_preview_description">Enter an international phone number and a password to try the sign-in preview.</string>
 </resources>
