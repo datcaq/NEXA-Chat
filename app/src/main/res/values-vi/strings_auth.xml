@@ -29,4 +29,7 @@
     <string name="auth_challenge_unavailable">Dịch vụ chưa sẵn sàng. Kiểm tra kết nối rồi thử lại.</string>
     <string name="auth_challenge_rate_limited">Bạn đã gửi quá nhiều yêu cầu. Hãy đợi trước khi thử lại.</string>
     <string name="auth_challenge_rejected">Yêu cầu xác minh không được chấp nhận.</string>
+    <string name="auth_password">Mật khẩu</string>
+    <string name="auth_error_password_required">Vui lòng nhập mật khẩu.</string>
+    <string name="auth_password_preview_description">Nhập số điện thoại quốc tế và mật khẩu để thử giao diện đăng nhập.</string>
 </resources>
