@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_title">Profile</string>
+    <string name="profile_preview_notice">This preview uses mock data. Changes are kept only while this screen is open.</string>
+    <string name="profile_avatar_preview">Sample avatar</string>
+    <string name="profile_name">Display name</string>
+    <string name="profile_bio">Bio</string>
+    <string name="profile_edit">Edit profile</string>
+    <string name="profile_save">Save preview</string>
+    <string name="profile_cancel">Cancel</string>
+    <string name="profile_name_required">Enter a display name.</string>
+    <string name="profile_saving">Saving preview…</string>
+    <string name="profile_saved_mock">Saved in this preview.</string>
+    <string name="profile_save_error">Could not save the preview. Try again.</string>
+    <string name="profile_mock_name" translatable="false">Minh An</string>
+</resources>
