@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_title">Hồ sơ</string>
+    <string name="profile_preview_notice">Bản xem trước dùng dữ liệu mẫu. Thay đổi chỉ được giữ trong màn hình này.</string>
+    <string name="profile_avatar_preview">Ảnh đại diện mẫu</string>
+    <string name="profile_name">Tên hiển thị</string>
+    <string name="profile_bio">Tiểu sử</string>
+    <string name="profile_edit">Chỉnh sửa hồ sơ</string>
+    <string name="profile_save">Lưu bản xem trước</string>
+    <string name="profile_cancel">Hủy</string>
+    <string name="profile_name_required">Vui lòng nhập tên hiển thị.</string>
+    <string name="profile_saving">Đang lưu bản xem trước…</string>
+    <string name="profile_saved_mock">Đã lưu trong bản xem trước.</string>
+    <string name="profile_save_error">Không thể lưu bản xem trước. Hãy thử lại.</string>
+</resources>
