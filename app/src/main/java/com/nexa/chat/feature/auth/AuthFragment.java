@@ -3,6 +3,7 @@ package com.nexa.chat.feature.auth;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.text.method.PasswordTransformationMethod;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -127,7 +128,7 @@ public final class AuthFragment extends Fragment {
                 phone.requestFocus();
                 return;
             }
-            password.setText(null);
+            resetPassword(password, passwordField);
             WindowCompat.getInsetsController(requireActivity().getWindow(), view)
                     .hide(WindowInsetsCompat.Type.ime());
         });
@@ -138,7 +139,7 @@ public final class AuthFragment extends Fragment {
             otpField.setError(null);
             otp.setText(null);
             passwordField.setError(null);
-            password.setText(null);
+            resetPassword(password, passwordField);
             AuthViewModel.Screen next;
             switch (viewModel.screen()) {
                 case SIGN_IN:
@@ -191,6 +192,15 @@ public final class AuthFragment extends Fragment {
     public void onSaveInstanceState(@NonNull Bundle outState) {
         outState.putString(REGION_KEY, region);
         super.onSaveInstanceState(outState);
+    }
+
+    private static void resetPassword(TextInputEditText password, TextInputLayout passwordField) {
+        if (!(password.getTransformationMethod() instanceof PasswordTransformationMethod)) {
+            // Let Material update both the transformation and the checked state of the icon.
+            passwordField.findViewById(com.google.android.material.R.id.text_input_end_icon)
+                    .performClick();
+        }
+        password.setText(null);
     }
 
     private void protectPasswordFromCapture(boolean containsPassword) {

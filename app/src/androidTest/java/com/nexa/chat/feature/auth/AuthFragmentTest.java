@@ -13,6 +13,7 @@ import android.os.Bundle;
 import android.text.method.PasswordTransformationMethod;
 import android.view.WindowManager;
 import android.view.View;
+import android.widget.Checkable;
 import android.widget.EditText;
 import android.widget.TextView;
 
@@ -193,8 +194,7 @@ public final class AuthFragmentTest {
         try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
             scenario.onActivity(activity -> {
                 EditText password = activity.findViewById(R.id.auth_password);
-                View toggle = activity.findViewById(R.id.auth_password_field)
-                        .findViewById(com.google.android.material.R.id.text_input_end_icon);
+                View toggle = passwordToggle(activity);
                 assertTrue(password.getTransformationMethod() instanceof PasswordTransformationMethod);
                 assertFalse(password.isSaveEnabled());
                 password.setText(Character.toString('x'));
@@ -210,7 +210,7 @@ public final class AuthFragmentTest {
             scenario.onActivity(activity -> {
                 EditText password = activity.findViewById(R.id.auth_password);
                 assertTrue(password.length() == 0);
-                assertTrue(password.getTransformationMethod() instanceof PasswordTransformationMethod);
+                assertPasswordMasked(password, passwordToggle(activity));
                 password.setText(Character.toString('x'));
                 View switchScreen = activity.findViewById(R.id.auth_switch);
                 switchScreen.performClick();
@@ -219,6 +219,71 @@ public final class AuthFragmentTest {
                 assertTrue(password.length() == 0);
             });
         }
+    }
+
+    @Test
+    public void passwordIsMaskedAfterSwitchAndMockSubmit() {
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> {
+                EditText password = activity.findViewById(R.id.auth_password);
+                View toggle = passwordToggle(activity);
+                password.setText(Character.toString('x'));
+                toggle.performClick();
+                assertTrue(((Checkable) toggle).isChecked());
+                View switchScreen = activity.findViewById(R.id.auth_switch);
+                switchScreen.performClick();
+                switchScreen.performClick();
+                password.setText(Character.toString('x'));
+                assertPasswordMasked(password, toggle);
+
+                toggle.performClick();
+                EditText phone = activity.findViewById(R.id.auth_phone);
+                phone.setText(PHONE);
+                activity.findViewById(R.id.auth_submit).performClick();
+                assertTrue(password.length() == 0);
+                assertPasswordMasked(password, toggle);
+                assertFalse(isWindowSecure(activity));
+            });
+        }
+    }
+
+    @Test
+    public void passwordCaptureProtectionPreservesHostFlagAndCleansUpOwnedFlag() {
+        for (boolean hostSecure : new boolean[] { false, true }) {
+            try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+                scenario.onActivity(activity -> {
+                    if (hostSecure) {
+                        activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                    }
+                    EditText password = activity.findViewById(R.id.auth_password);
+                    password.setText(Character.toString('x'));
+                    assertTrue(isWindowSecure(activity));
+                    password.setText(null);
+                    assertEquals(hostSecure, isWindowSecure(activity));
+                    password.setText(Character.toString('x'));
+                    Fragment auth = activity.getSupportFragmentManager()
+                            .findFragmentById(R.id.main_content);
+                    activity.getSupportFragmentManager().beginTransaction().remove(auth).commitNow();
+                    assertEquals(hostSecure, isWindowSecure(activity));
+                });
+            }
+        }
+    }
+
+    private static View passwordToggle(MainActivity activity) {
+        return activity.findViewById(R.id.auth_password_field)
+                .findViewById(com.google.android.material.R.id.text_input_end_icon);
+    }
+
+    private static void assertPasswordMasked(EditText password, View toggle) {
+        assertTrue("Password must be masked by default",
+                password.getTransformationMethod() instanceof PasswordTransformationMethod);
+        assertFalse("Visibility toggle must be unchecked", ((Checkable) toggle).isChecked());
+    }
+
+    private static boolean isWindowSecure(MainActivity activity) {
+        return (activity.getWindow().getAttributes().flags
+                & WindowManager.LayoutParams.FLAG_SECURE) != 0;
     }
 
     @Test
